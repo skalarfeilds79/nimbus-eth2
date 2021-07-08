@@ -402,6 +402,7 @@ proc makeBeaconBlock*(
     proposerSlashings: seq[ProposerSlashing],
     attesterSlashings: seq[AttesterSlashing],
     voluntaryExits: seq[SignedVoluntaryExit],
+    sync_aggregate: SyncAggregate,
     executionPayload: ExecutionPayload,
     rollback: RollbackAltairHashedProc,
     cache: var StateCache): Option[altair.BeaconBlock] =
