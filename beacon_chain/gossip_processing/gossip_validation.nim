@@ -269,7 +269,7 @@ proc validateAttestation*(
       "validateAttestation: number of aggregation bits and committee size mismatch"))
 
   let
-    fork = getStateField(pool.dag.headState.data, fork)
+    fork = pool.dag.forkAtSlot(attestation.data.slot)
     genesis_validators_root =
       getStateField(pool.dag.headState.data, genesis_validators_root)
     attesting_index = get_attesting_indices_one(
@@ -448,7 +448,7 @@ proc validateAggregate*(
   # 3. [REJECT] The signature of aggregate is valid.
 
   let
-    fork = getStateField(pool.dag.headState.data, fork)
+    fork = pool.dag.forkAtSlot(aggregate.data.slot)
     genesis_validators_root =
       getStateField(pool.dag.headState.data, genesis_validators_root)
 
@@ -650,7 +650,7 @@ proc isValidBeaconBlock*(
   # [REJECT] The proposer signature, signed_beacon_block.signature, is valid
   # with respect to the proposer_index pubkey.
   if not verify_block_signature(
-      getStateField(dag.headState.data, fork),
+      dag.forkAtSlot(signed_beacon_block.message.slot),
       getStateField(dag.headState.data, genesis_validators_root),
       signed_beacon_block.message.slot,
       signed_beacon_block.message,
