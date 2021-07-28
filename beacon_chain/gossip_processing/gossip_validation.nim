@@ -829,8 +829,8 @@ proc validateSyncCommitteeMessage*(
     # [REJECT] The signature is valid for the message beacon_block_root for the
     # validator referenced by validator_index.
     let
-      slot = msg.slot
-      fork = dag.forkAtSlot(slot)
+      epoch = msg.slot.epoch
+      fork = dag.forkAtEpoch(epoch)
       genesisValidatorsRoot = dag.genesisValidatorsRoot
       senderPubKey = dag.validatorKey(msg.validator_index)
 
@@ -918,8 +918,8 @@ proc validateSignedContributionAndProof*(
         "validateSignedContributionAndProof: aggregator index too high")))
 
     let
-      slot = msg.message.contribution.slot
-      fork = dag.forkAtSlot(slot)
+      epoch = msg.message.contribution.slot.epoch
+      fork = dag.forkAtEpoch(epoch)
       genesisValidatorsRoot = dag.genesisValidatorsRoot
 
     # [REJECT] The aggregator signature, signed_contribution_and_proof.signature, is valid

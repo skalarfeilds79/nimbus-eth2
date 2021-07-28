@@ -562,11 +562,11 @@ func stateCheckpoint*(bs: BlockSlot): BlockSlot =
     bs = bs.parentOrSlot
   bs
 
-template forkAtSlot*(dag: ChainDAGRef, slot: Slot): Fork =
-  forkAtSlot(dag.cfg, slot)
+template forkAtEpoch*(dag: ChainDAGRef, epoch: Epoch): Fork =
+  forkAtEpoch(dag.cfg, epoch)
 
-proc forkDigestAtSlot*(dag: ChainDAGRef, slot: Slot): ForkDigest =
-  if slot.epoch < dag.cfg.ALTAIR_FORK_EPOCH:
+proc forkDigestAtEpoch*(dag: ChainDAGRef, epoch: Epoch): ForkDigest =
+  if epoch < dag.cfg.ALTAIR_FORK_EPOCH:
     dag.forkDigests.phase0
   else:
     dag.forkDigests.altair

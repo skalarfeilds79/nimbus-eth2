@@ -179,7 +179,7 @@ proc sendAttestation*(
     of ValidationResult.Accept:
       # TODO altair: this probably is just a function of wallslot's altair, not
       # attestation.data.slot?
-      let forkPrefix = node.dag.forkDigestAtSlot(attestation.data.slot)
+      let forkPrefix = node.dag.forkDigestAtEpoch(attestation.data.slot.epoch)
       node.network.broadcast(
         getAttestationTopic(forkPrefix, subnet_id),
         attestation)
@@ -234,17 +234,17 @@ proc sendSyncCommitteeContribution*(
 
 proc sendVoluntaryExit*(node: BeaconNode, exit: SignedVoluntaryExit) =
   let exitsTopic = getVoluntaryExitsTopic(
-    node.dag.forkDigestAtSlot(node.beaconClock.now().slotOrZero))
+    node.dag.forkDigestAtEpoch(node.beaconClock.now.slotOrZero.epoch))
   node.network.broadcast(exitsTopic, exit)
 
 proc sendAttesterSlashing*(node: BeaconNode, slashing: AttesterSlashing) =
   let attesterSlashingsTopic = getAttesterSlashingsTopic(
-    node.dag.forkDigestAtSlot(node.beaconClock.now().slotOrZero))
+    node.dag.forkDigestAtEpoch(node.beaconClock.now.slotOrZero.epoch))
   node.network.broadcast(attesterSlashingsTopic, slashing)
 
 proc sendProposerSlashing*(node: BeaconNode, slashing: ProposerSlashing) =
   let proposerSlashingsTopic = getProposerSlashingsTopic(
-    node.dag.forkDigestAtSlot(node.beaconClock.now().slotOrZero))
+    node.dag.forkDigestAtEpoch(node.beaconClock.now.slotOrZero.epoch))
   node.network.broadcast(proposerSlashingsTopic, slashing)
 
 proc sendAttestation*(node: BeaconNode, attestation: Attestation): Future[bool] =
@@ -499,7 +499,7 @@ proc proposeBlock(node: BeaconNode,
     return head
 
   let
-    fork = node.dag.forkAtSlot(slot)
+    fork = node.dag.forkAtEpoch(slot.epoch)
     genesis_validators_root =
       getStateField(node.dag.headState.data, genesis_validators_root)
     randao = await validator.genRandaoReveal(
@@ -594,7 +594,7 @@ proc handleAttestations(node: BeaconNode, head: BlockRef, slot: Slot) =
     epochRef = node.dag.getEpochRef(
       attestationHead.blck, slot.compute_epoch_at_slot())
     committees_per_slot = get_committee_count_per_slot(epochRef)
-    fork = node.dag.forkAtSlot(slot)
+    fork = node.dag.forkAtEpoch(slot.epoch)
     genesis_validators_root =
       getStateField(node.dag.headState.data, genesis_validators_root)
 
@@ -637,7 +637,7 @@ proc createAndSendSyncCommitteeMessage(node: BeaconNode,
                                        head: BlockRef) {.async.} =
   try:
     let
-      fork = node.dag.forkAtSlot(slot)
+      fork = node.dag.forkAtEpoch(slot.epoch)
       genesisValidatorsRoot = node.dag.genesisValidatorsRoot
       msg = await signSyncCommitteeMessage(validator, slot, fork,
                                            genesisValidatorsRoot, head.root)
@@ -696,7 +696,7 @@ proc signAndSendContribution(node: BeaconNode,
         selection_proof: selectionProof))
 
     await validator.sign(msg,
-                         node.dag.forkAtSlot(contribution.slot),
+                         node.dag.forkAtEpoch(contribution.slot.epoch),
                          node.dag.genesisValidatorsRoot)
 
     node.network.broadcast(
@@ -711,7 +711,7 @@ proc handleSyncCommitteeContributions(node: BeaconNode,
                                       head: BlockRef, slot: Slot) {.async.} =
   # TODO Use a view type to avoid the copy
   let
-    fork = node.dag.forkAtSlot(slot)
+    fork = node.dag.forkAtEpoch(slot.epoch)
     genesisValidatorsRoot = node.dag.genesisValidatorsRoot
     syncCommittee = @(node.dag.syncCommitteeParticipants(head))
 
@@ -795,7 +795,7 @@ proc sendAggregatedAttestations(
 
   let
     epochRef = node.dag.getEpochRef(aggregationHead, aggregationSlot.epoch)
-    fork = node.dag.forkAtSlot(aggregationSlot)
+    fork = node.dag.forkAtEpoch(aggregationSlot.epoch)
     genesis_validators_root = node.dag.genesisValidatorsRoot
     committees_per_slot = get_committee_count_per_slot(epochRef)
 
@@ -834,7 +834,7 @@ proc sendAggregatedAttestations(
         message: aggregateAndProof.get,
         signature: sig)
       node.network.broadcast(getAggregateAndProofsTopic(
-        node.dag.forkDigestAtSlot(node.beaconClock.now().slotOrZero)), signedAP)
+        node.dag.forkDigestAtEpoch(node.beaconClock.now.slotOrZero.epoch)), signedAP)
       notice "Aggregated attestation sent",
         attestation = shortLog(signedAP.message.aggregate),
         validator = shortLog(curr[0].v),
