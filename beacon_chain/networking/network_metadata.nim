@@ -177,7 +177,7 @@ proc getMetadataForNetwork*(networkName: string): Eth2NetworkMetadata {.raises: 
       of "altair-devnet-1":
         altairDevnet1Metadata
       of "altair-devnet-2":
-        altairDevnet1Metadata
+        altairDevnet2Metadata
       else:
         if fileExists(networkName / "config.yaml"):
           try:
