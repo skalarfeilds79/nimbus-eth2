@@ -121,12 +121,15 @@ proc getAttachedValidator*(node: BeaconNode,
                            pubkey: ValidatorPubKey): AttachedValidator =
   node.attachedValidators[].getValidator(pubkey)
 
+template isActivated(v: AttachedValidator): bool =
+  v.index.isSome
+
 proc getAttachedValidator*(node: BeaconNode,
                            idx: ValidatorIndex): AttachedValidator =
   # TODO Make this more optimal by adding a search by id operation
   #      in the validator pool
   let key = node.dag.validatorKey(idx)
-  if key .isSome:
+  if key.isSome:
     let validator = node.getAttachedValidator(key.get().toPubKey())
     if validator != nil and validator.index != some(idx):
       # Update index, in case the validator was activated!
@@ -679,7 +682,7 @@ proc handleSyncCommitteeMessages(node: BeaconNode, head: BlockRef, slot: Slot) =
   for subnetIdx in 0 ..< SYNC_COMMITTEE_SUBNET_COUNT:
     for valKey in syncSubcommittee(syncCommittee, SubnetId subnetIdx):
       let validator = node.getAttachedValidator(valKey)
-      if validator == nil:
+      if validator == nil or not validator.isActivated:
         continue
       asyncSpawn createAndSendSyncCommitteeMessage(node, slot, validator,
                                                    SubnetId subnetIdx, head)
