@@ -977,8 +977,8 @@ proc pruneBlocksDAG(dag: ChainDAGRef) =
     prunedHeads = hlen - dag.heads.len,
     dagPruneDur = Moment.now() - startTick
 
-proc syncSubcommittee*(syncCommittee: openarray[ValidatorIndex],
-                       subnetId: SubnetId): seq[ValidatorIndex] =
+proc syncSubcommittee*(syncCommittee: openarray[ValidatorPubKey],
+                       subnetId: SubnetId): seq[ValidatorPubKey] =
   ## TODO Return a view type
   ## Unfortunately, this doesn't work as a template right now.
   if syncCommittee.len == 0:
@@ -991,35 +991,89 @@ proc syncSubcommittee*(syncCommittee: openarray[ValidatorIndex],
 
   @(toOpenArray(syncCommittee, startIdx, onePastEndIdx - 1))
 
-proc getSubcommitteePosition*(dag: ChainDAGRef,
-                              blockRef: BlockRef,
-                              committeeIdx: SubnetId,
-                              validatorIdx: ValidatorIndex): Option[uint64] =
-  let epochRef = dag.getEpochRef(blockRef, blockRef.slot.epoch)
-  for pos, valIdx in epochRef.sync_committee.syncSubcommittee(committeeIdx):
-    if valIdx == validatorIdx:
+const emptySyncCommittee = newSeq[ValidatorPubKey]()
+
+proc syncCommitteeParticipants*(dagParam: ChainDAGRef,
+                                slotParam: Slot): seq[ValidatorPubKey] =
+  # TODO:
+  # Use view types in Nim 1.6
+  # Right now, the compiler is not able to handle turning this into a
+  # template and returning an openarray
+  let
+    dag = dagParam
+    slot = slotParam
+
+  if dag.headState.data.beaconStateFork == forkAltair:
+    let
+      headSlot = dag.headState.data.hbsAltair.data.slot
+      headCommitteePeriod = syncCommitteePeriod(headSlot)
+      periodStart = syncCommitteePeriodStartSlot(headCommitteePeriod)
+      nextPeriodStart = periodStart + SLOTS_PER_SYNC_COMMITTEE_PERIOD
+
+    if slot >= nextPeriodStart:
+      @(dag.headState.data.hbsAltair.data.next_sync_committee.pubkeys.data)
+    elif slot >= periodStart:
+      @(dag.headState.data.hbsAltair.data.current_sync_committee.pubkeys.data)
+    else:
+      emptySyncCommittee
+  else:
+    emptySyncCommittee
+
+proc getSubcommitteePositionAux*(
+    dag: ChainDAGRef,
+    syncCommittee: openarray[ValidatorPubKey],
+    committeeIdx: SubnetId,
+    validatorIdx: ValidatorIndex): Option[uint64] =
+
+  let validatorKeyOpt = dag.validatorKey(validatorIdx)
+  if validatorKeyOpt.isNone:
+    return
+
+  let validatorKey = validatorKeyOpt.get.toPubKey
+
+  for pos, key in syncCommittee.syncSubcommittee(committeeIdx):
+    if validatorKey == key:
       return some uint64(pos)
 
-template syncCommitteeParticipants*(dag: ChainDAGRef,
-                                    blockRef: BlockRef): openarray[ValidatorIndex] =
-  dag.getEpochRef(blockRef, blockRef.slot.epoch).sync_committee
+proc getSubcommitteePosition*(dag: ChainDAGRef,
+                              slot: Slot,
+                              committeeIdx: SubnetId,
+                              validatorIdx: ValidatorIndex): Option[uint64] =
+  if dag.headState.data.beaconStateFork == forkPhase0:
+    return
+
+  let
+    headSlot = dag.headState.data.hbsAltair.data.slot
+    headCommitteePeriod = syncCommitteePeriod(headSlot)
+    periodStart = syncCommitteePeriodStartSlot(headCommitteePeriod)
+    nextPeriodStart = periodStart + SLOTS_PER_SYNC_COMMITTEE_PERIOD
+
+  template search(syncCommittee: openarray[ValidatorPubKey]): Option[uint64] =
+    dag.getSubcommitteePositionAux(syncCommittee, committeeIdx, validatorIdx)
+
+  if slot < periodStart:
+    return
+  elif slot >= nextPeriodStart:
+    return search(dag.headState.data.hbsAltair.data.next_sync_committee.pubkeys.data)
+  else:
+    return search(dag.headState.data.hbsAltair.data.current_sync_committee.pubkeys.data)
 
 template syncCommitteeParticipants*(
     dag: ChainDAGRef,
-    blockRef: BlockRef,
-    committeeIdx: SubnetId): seq[ValidatorIndex] =
+    slot: Slot,
+    committeeIdx: SubnetId): seq[ValidatorPubKey] =
   let
     startIdx = committeeIdx.int * SYNC_SUBCOMMITTEE_SIZE
     onePastEndIdx = startIdx + SYNC_SUBCOMMITTEE_SIZE
   # TODO Nim is not happy with returning an openarray here
-  @(toOpenArray(dag.syncCommitteeParticipants(blockRef), startIdx, onePastEndIdx - 1))
+  @(toOpenArray(dag.syncCommitteeParticipants(slot), startIdx, onePastEndIdx - 1))
 
 iterator syncCommitteeParticipants*(
     dag: ChainDAGRef,
-    blockRef: BlockRef,
+    slot: Slot,
     committeeIdx: SubnetId,
-    aggregationBits: SyncCommitteeAggregationBits): ValidatorIndex =
-  for pos, valIdx in pairs(dag.syncCommitteeParticipants(blockRef, committeeIdx)):
+    aggregationBits: SyncCommitteeAggregationBits): ValidatorPubKey =
+  for pos, valIdx in pairs(dag.syncCommitteeParticipants(slot, committeeIdx)):
     if aggregationBits[pos]:
       yield valIdx
 

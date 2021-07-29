@@ -211,16 +211,18 @@ proc verify_voluntary_exit_signature*(
     blsVerify(pubkey, signing_root.data, signature)
 
 proc verify_sync_committee_message_signature*(
-    msg: SyncCommitteeMessage | SyncCommitteeContribution,
+    epoch: Epoch,
+    beacon_block_root: Eth2Digest,
     fork: Fork,
     genesis_validators_root: Eth2Digest,
-    pubkey: ValidatorPubKey | CookedPubKey): bool =
+    pubkey: CookedPubKey,
+    signature: CookedSig): bool =
   let
     domain = get_domain(
-      fork, DOMAIN_SYNC_COMMITTEE, msg.slot.epoch, genesis_validators_root)
-    signing_root = compute_signing_root(msg.beacon_block_root, domain)
+      fork, DOMAIN_SYNC_COMMITTEE, epoch, genesis_validators_root)
+    signing_root = compute_signing_root(beacon_block_root, domain)
 
-  blsVerify(pubkey, signing_root.data, msg.signature)
+  blsVerify(pubkey, signing_root.data, signature)
 
 # https://github.com/ethereum/eth2.0-specs/blob/v1.1.0-alpha.7/specs/altair/validator.md#aggregation-selection
 proc is_sync_committee_aggregator*(signature: ValidatorSig): bool =

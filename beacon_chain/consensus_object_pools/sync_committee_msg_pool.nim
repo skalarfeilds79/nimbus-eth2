@@ -20,30 +20,36 @@ proc init*(T: type SyncCommitteeMsgPool): SyncCommitteeMsgPool =
 proc clearPerSlotData*(pool: var SyncCommitteeMsgPool) =
   clear pool.seenAggregateByAuthor
   clear pool.seenByAuthor
-  clear pool.bestAggregates
-  clear pool.blockVotes
+  # TODO The previously implemened pruning has proven to be too
+  # aggressive. We can consider a scheme where the data is pruned
+  # with several slots of delay to allow for late sync committee
+  # messages.
+  # clear pool.bestAggregates
+  # clear pool.blockVotes
 
-proc addMsg*(pool: var SyncCommitteeMsgPool,
-             # TODO Break down the `msg` object in 2 separate params
-             # and change the signature to be `Cooked`, so we can put
-             # the validity assumption at the caller site.
-             msg: SyncCommitteeMessage,
-             subnetId: SubnetId,
-             positionInSubnet: uint64) =
-  if msg.beacon_block_root notin pool.blockVotes:
-    pool.blockVotes[msg.beacon_block_root] = @[]
+proc addSyncCommitteeMsg*(
+    pool: var SyncCommitteeMsgPool,
+    slot: Slot,
+    beaconBlockRoot: Eth2Digest,
+    signature: CookedSig,
+    subnetId: SubnetId,
+    positionInSubnet: uint64) =
+
+  if beaconBlockRoot notin pool.blockVotes:
+    pool.blockVotes[beaconBlockRoot] = @[]
 
   try:
-    pool.blockVotes[msg.beacon_block_root].add TrustedSyncCommitteeMsg(
+    pool.blockVotes[beaconBlockRoot].add TrustedSyncCommitteeMsg(
+      slot: slot,
       subnetId: subnetId,
       positionInSubnet: positionInSubnet,
-      signature: msg.signature.load.get)
+      signature: signature)
   except KeyError:
     raiseAssert "We have checked for the key upfront"
 
-proc computeAggregateSig(contribution: var SyncCommitteeContribution,
-                         votes: seq[TrustedSyncCommitteeMsg],
-                         subnetId: SubnetId) =
+proc computeAggregateSig(votes: seq[TrustedSyncCommitteeMsg],
+                         subnetId: SubnetId,
+                         contribution: var SyncCommitteeContribution): bool =
   var
     aggregateSig {.noInit.}: AggregateSignature
     initialized = false
@@ -60,24 +66,29 @@ proc computeAggregateSig(contribution: var SyncCommitteeContribution,
 
     contribution.aggregation_bits.setBit vote.positionInSubnet
 
-  contribution.signature = aggregateSig.finish.toValidatorSig
+  if initialized:
+    contribution.signature = aggregateSig.finish.toValidatorSig
+
+  return initialized
 
 proc produceContribution*(
     pool: SyncCommitteeMsgPool,
     slot: Slot,
     head: BlockRef,
-    subnetId: SubnetId): SyncCommitteeContribution =
-  result.slot = slot
-  result.beacon_block_root = head.root
-  result.subcommittee_index = uint64 subnetId
-
+    subnetId: SubnetId,
+    outContribution: var SyncCommitteeContribution): bool =
   if head.root in pool.blockVotes:
+    outContribution.slot = slot
+    outContribution.beacon_block_root = head.root
+    outContribution.subcommittee_index = uint64 subnetId
     try:
-      result.computeAggregateSig(pool.blockVotes[head.root], subnetId)
+      return computeAggregateSig(pool.blockVotes[head.root],
+                                 subnetId,
+                                 outContribution)
     except KeyError:
       raiseAssert "We have checked for the key upfront"
   else:
-    result.signature = default(ValidatorSig)
+    return false
 
 proc addAggregateAux(bestVotes: var BestSyncSubcommitteeContributions,
                      contribution: SyncCommitteeContribution) =
@@ -89,29 +100,32 @@ proc addAggregateAux(bestVotes: var BestSyncSubcommitteeContributions,
         participationBits: contribution.aggregation_bits,
         signature: contribution.signature.load.get)
 
-proc addAggregate*(pool: var SyncCommitteeMsgPool,
-                   msg: SignedContributionAndProof) =
-  template blockRoot: auto = msg.message.contribution.beacon_block_root
+proc addSyncContribution*(
+    pool: var SyncCommitteeMsgPool,
+    contribution: SyncCommitteeContribution,
+    signature: CookedSig) =
+
+  template blockRoot: auto = contribution.beacon_block_root
 
   if blockRoot notin pool.bestAggregates:
     var bestContributions: BestSyncSubcommitteeContributions
 
-    let totalParticipants = countOnes(msg.message.contribution.aggregation_bits)
+    let totalParticipants = countOnes(contribution.aggregation_bits)
 
-    bestContributions[msg.message.contribution.subcommittee_index] =
+    bestContributions[contribution.subcommittee_index] =
       BestSyncSubcommitteeContribution(
         totalParticipants: totalParticipants,
-        participationBits: msg.message.contribution.aggregation_bits,
-        signature: msg.message.contribution.signature.load.get)
+        participationBits: contribution.aggregation_bits,
+        signature: signature)
 
     pool.bestAggregates[blockRoot] = bestContributions
   else:
     try:
-      addAggregateAux(pool.bestAggregates[blockRoot], msg.message.contribution)
+      addAggregateAux(pool.bestAggregates[blockRoot], contribution)
     except KeyError:
       raiseAssert "We have checked for the key upfront"
 
-proc prodeuceSyncAggregateAux(votes: BestSyncSubcommitteeContributions): SyncAggregate =
+proc produceSyncAggregateAux(votes: BestSyncSubcommitteeContributions): SyncAggregate =
   var
     aggregateSig {.noInit.}: AggregateSignature
     initialized = false
@@ -138,12 +152,12 @@ proc prodeuceSyncAggregateAux(votes: BestSyncSubcommitteeContributions): SyncAgg
 
 proc produceSyncAggregate*(
     pool: SyncCommitteeMsgPool,
-    head: BlockRef): SyncAggregate =
-  if head.root in pool.bestAggregates:
+    target: BlockRef): SyncAggregate =
+  if target.root in pool.bestAggregates:
     try:
-      prodeuceSyncAggregateAux(pool.bestAggregates[head.root])
+      produceSyncAggregateAux(pool.bestAggregates[target.root])
     except KeyError:
       raiseAssert "We have checked for the key upfront"
   else:
-    default(SyncAggregate)
+    SyncAggregate(sync_committee_signature: ValidatorSig.infinity)
 

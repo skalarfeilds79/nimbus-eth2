@@ -86,6 +86,7 @@ type
     committeeIdx*: uint64
 
   TrustedSyncCommitteeMsg* = object
+    slot*: Slot
     subnetId*: SubnetId
     positionInSubnet*: uint64
     signature*: CookedSig

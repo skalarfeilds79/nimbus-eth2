@@ -768,7 +768,7 @@ proc validateSyncCommitteeMessage*(
     dag: ChainDAGRef,
     syncCommitteeMsgPool: SyncCommitteeMsgPoolRef,
     msg: SyncCommitteeMessage,
-    subnet_id: SubnetId,
+    subnetId: SubnetId,
     wallTime: BeaconTime,
     checkSignature: bool):
     Result[void, (ValidationResult, cstring)] =
@@ -780,25 +780,12 @@ proc validateSyncCommitteeMessage*(
     if res.isErr:
       return res
 
-  let blockRef = dag.getRef(msg.beacon_block_root)
-  if blockRef == nil:
-    # TODO quarantine.addMissing perhaps?
-    return err((ValidationResult.Ignore, cstring(
-      "validateSyncCommitteeMessage: unknown target block")))
-    # TODO Insteading of ignoring the message, we have some other reasonable
-    # alternative policies:
-    # 1) We can optimistically attempt to validate the message against the
-    #    current head block syncing committee. The assumption here is that
-    #    syncining committees changes are relatively rare events.
-    # 2) We can postpone the rest of the processing until the missing block
-    #    becomes available.
-
   # [REJECT] The subnet_id is valid for the given validator
   # i.e. subnet_id in compute_subnets_for_sync_committee(state, sync_committee_message.validator_index).
   # Note this validation implies the validator is part of the broader
   # current sync committee along with the correct subcommittee.
   let positionInSubcommittee = dag.getSubcommitteePosition(
-    blockRef, subnet_id, ValidatorIndex msg.validator_index)
+    msg.slot + 1, subnetId, ValidatorIndex msg.validator_index)
 
   if positionInSubcommittee.isNone:
     return err((ValidationResult.Reject, cstring(
@@ -816,7 +803,7 @@ proc validateSyncCommitteeMessage*(
     let msgKey = SyncCommitteeMsgKey(
       originator: ValidatorIndex msg.validator_index,
       slot: msg.slot,
-      committeeIdx: uint64 subnet_id)
+      committeeIdx: uint64 subnetId)
 
     if msgKey in syncCommitteeMsgPool.seenByAuthor:
       return err((ValidationResult.Ignore, cstring(
@@ -837,14 +824,26 @@ proc validateSyncCommitteeMessage*(
       return err((ValidationResult.Reject, cstring(
         "validateSyncCommitteeMessage: invalid validator index")))
 
+    var cookedSignature = msg.signature.load
+    if cookedSignature.isNone:
+      return err((ValidationResult.Reject, cstring(
+        "validateSyncCommitteeMessage: signature fails to load")))
+
     if checkSignature and
-       not verify_sync_committee_message_signature(msg,
+       not verify_sync_committee_message_signature(epoch,
+                                                   msg.beacon_block_root,
                                                    fork, genesisValidatorsRoot,
-                                                   senderPubKey.get):
+                                                   senderPubKey.get,
+                                                   cookedSignature.get):
       return err((ValidationResult.Reject, cstring(
         "validateSyncCommitteeMessage: signature fails to verify")))
 
-  syncCommitteeMsgPool[].addMsg(msg, subnet_id, positionInSubcommittee.get)
+    syncCommitteeMsgPool[].addSyncCommitteeMsg(
+      msg.slot,
+      msg.beacon_block_root,
+      cookedSignature.get,
+      subnetId,
+      positionInSubcommittee.get)
 
   ok()
 
@@ -878,19 +877,6 @@ proc validateSignedContributionAndProof*(
       return err((ValidationResult.Reject, cstring(
         "validateSignedContributionAndProof: invalid selection_proof")))
 
-  let blockRef = dag.getRef(msg.message.contribution.beacon_block_root)
-  if blockRef == nil:
-    # TODO quarantine.addMissing perhaps?
-    return err((ValidationResult.Ignore, cstring(
-      "validateSyncCommitteeMessage: unknown target block")))
-    # TODO Insteading of ignoring the message, we have some other reasonable
-    # alternative policies:
-    # 1) We can optimistically attempt to validate the message against the
-    #    current head block syncing committee. The assumption here is that
-    #    syncining committees changes are relatively rare events.
-    # 2) We can postpone the rest of the processing until the missing block
-    #    becomes available.
-
   block:
     # [IGNORE] The sync committee contribution is the first valid contribution
     # received for the aggregator with index contribution_and_proof.aggregator_index
@@ -909,8 +895,10 @@ proc validateSignedContributionAndProof*(
       syncCommitteeMsgPool.seenAggregateByAuthor.incl msgKey
 
   block:
-    # [REJECT] The aggregator's validator index is in the declared subcommittee of the current sync committee
-    # i.e. state.validators[contribution_and_proof.aggregator_index].pubkey in get_sync_subcommittee_pubkeys(state, contribution.subcommittee_index).
+    # [REJECT] The aggregator's validator index is in the declared subcommittee
+    # of the current sync committee.
+    # i.e. state.validators[contribution_and_proof.aggregator_index].pubkey in
+    #      get_sync_subcommittee_pubkeys(state, contribution.subcommittee_index).
     let aggregatorPubKey = dag.validatorKey(msg.message.aggregator_index)
     if aggregatorPubKey.isNone:
       return err((ValidationResult.Reject, cstring(
@@ -944,25 +932,39 @@ proc validateSignedContributionAndProof*(
       committeeAggKey {.noInit.}: AggregatePublicKey
       initialized = false
 
-    for valIndex in dag.syncCommitteeParticipants(
-                      blockRef,
-                      SubnetId msg.message.contribution.subcommittee_index,
-                      msg.message.contribution.aggregation_bits):
-      let validatorPubKey = dag.validatorKey(valIndex).get # the index should be valid
+    for validatorPubKey in dag.syncCommitteeParticipants(
+        msg.message.contribution.slot + 1,
+        SubnetId msg.message.contribution.subcommittee_index,
+        msg.message.contribution.aggregation_bits):
+      let validatorPubKey = validatorPubKey.load.get
       if not initialized:
         initialized = true
         committeeAggKey.init(validatorPubKey)
       else:
         committeeAggKey.aggregate(validatorPubKey)
 
+    if not initialized:
+      # [REJECT] The contribution has participants
+      # that is, any(contribution.aggregation_bits).
+      if msg.message.contribution.aggregation_bits.isZeros:
+        return err((ValidationResult.Reject, cstring(
+          "validateSignedContributionAndProof: aggregation bits empty")))
+
+    let cookedSignature = msg.signature.load
+    if cookedSignature.isNone:
+      return err((ValidationResult.Reject, cstring(
+        "validateSignedContributionAndProof: aggregate signature fails to load")))
+
     if checkSignature and
-       not verify_sync_committee_message_signature(msg.message.contribution,
-                                                   fork, genesisValidatorsRoot,
-                                                   committeeAggKey.finish):
+       not verify_sync_committee_message_signature(
+         epoch, msg.message.contribution.beacon_block_root, fork,
+         genesisValidatorsRoot, committeeAggKey.finish, cookedSignature.get):
       return err((ValidationResult.Reject, cstring(
         "validateSignedContributionAndProof: aggregate signature fails to verify")))
 
-  syncCommitteeMsgPool[].addAggregate msg
+    syncCommitteeMsgPool[].addSyncContribution(
+      msg.message.contribution,
+      cookedSignature.get)
 
   ok()
 
