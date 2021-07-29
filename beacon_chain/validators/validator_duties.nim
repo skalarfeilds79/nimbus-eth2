@@ -401,7 +401,7 @@ proc makeBeaconBlockForHeadAndSlot*(node: BeaconNode,
         # TODO address this ugly workaround - there should probably be a
         #      `state_transition` that takes a `StateData` instead and updates
         #      the block as well
-        doAssert v.addr == addr proposalStateAddr.data.hbsPhase0
+        doAssert v.addr == addr proposalStateAddr.data.hbsAltair
         assign(proposalStateAddr[], poolPtr.headState)
 
       let optBlock = makeBeaconBlock(
