@@ -173,11 +173,12 @@ proc signSyncCommitteeMessage*(v: AttachedValidator,
   else:
     await signWithRemoteValidator(v, signing_root)
 
-  return SyncCommitteeMessage(
-    slot: slot,
-    beacon_block_root: block_root,
-    validator_index: v.index.get.uint64,
-    signature: signature)
+  if v.index.isSome:
+    return SyncCommitteeMessage(
+      slot: slot,
+      beacon_block_root: block_root,
+      validator_index: v.index.get.uint64,
+      signature: signature)
 
 # https://github.com/ethereum/eth2.0-specs/blob/v1.1.0-alpha.7/specs/altair/validator.md#aggregation-selection
 proc getSyncCommitteeSelectionProof*(
