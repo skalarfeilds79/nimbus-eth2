@@ -362,7 +362,8 @@ proc syncCommitteeMsgValidator*(
 
   # Potential under/overflows are fine; would just create odd metrics and logs
   let delay = wallTime - syncCommitteeMsg.slot.toBeaconTime
-  debug "Sync committee message received", delay
+  debug "Sync committee message received",
+        delay, msg = shortLog(syncCommitteeMsg)
 
   # Now proceed to validation
   let v = validateSyncCommitteeMessage(self.dag, self.syncCommitteeMsgPool,
@@ -382,7 +383,9 @@ proc syncCommitteeContributionValidator*(
 
   # Potential under/overflows are fine; would just create odd metrics and logs
   let delay = wallTime - contributionAndProof.message.contribution.slot.toBeaconTime
-  debug "Sync committee contribution received", delay
+  debug "Sync committee contribution received",
+        delay, aggregator = contributionAndProof.message.aggregator_index,
+        msg = shortLog(contributionAndProof.message.contribution)
 
   # Now proceed to validation
   let v = validateSignedContributionAndProof(self.dag, self.syncCommitteeMsgPool,

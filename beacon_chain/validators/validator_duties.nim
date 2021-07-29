@@ -418,7 +418,7 @@ proc makeBeaconBlockForHeadAndSlot*(node: BeaconNode,
         node.exitPool[].getProposerSlashingsForBlock(),
         node.exitPool[].getAttesterSlashingsForBlock(),
         node.exitPool[].getVoluntaryExitsForBlock(),
-        node.sync_committee_msg_pool[].produceSyncAggregate(head),
+        node.sync_committee_msg_pool[].produceSyncAggregate(head.parent),
         default(ExecutionPayload),
         restore,
         cache)
@@ -674,11 +674,11 @@ proc createAndSendSyncCommitteeMessage(node: BeaconNode,
 
 proc handleSyncCommitteeMessages(node: BeaconNode, head: BlockRef, slot: Slot) =
   # TODO Use a view type to avoid the copy
-  var syncCommittee = @(node.dag.syncCommitteeParticipants(head))
+  var syncCommittee = @(node.dag.syncCommitteeParticipants(slot + 1))
 
   for subnetIdx in 0 ..< SYNC_COMMITTEE_SUBNET_COUNT:
-    for valIdx in syncSubcommittee(syncCommittee, SubnetId subnetIdx):
-      let validator = node.getAttachedValidator(valIdx)
+    for valKey in syncSubcommittee(syncCommittee, SubnetId subnetIdx):
+      let validator = node.getAttachedValidator(valKey)
       if validator == nil:
         continue
       asyncSpawn createAndSendSyncCommitteeMessage(node, slot, validator,
@@ -713,7 +713,7 @@ proc handleSyncCommitteeContributions(node: BeaconNode,
   let
     fork = node.dag.forkAtEpoch(slot.epoch)
     genesisValidatorsRoot = node.dag.genesisValidatorsRoot
-    syncCommittee = @(node.dag.syncCommitteeParticipants(head))
+    syncCommittee = @(node.dag.syncCommitteeParticipants(slot + 1))
 
   type
     AggregatorCandidate = object
@@ -726,8 +726,8 @@ proc handleSyncCommitteeContributions(node: BeaconNode,
   for committeeIdx in 0 ..< SYNC_COMMITTEE_SUBNET_COUNT:
     # TODO Hoist outside of the loop with a view type
     #      to avoid the repeated offset calculations
-    for valIdx in syncSubcommittee(syncCommittee, SubnetId committeeIdx):
-      let validator = node.getAttachedValidator(valIdx)
+    for valKey in syncSubcommittee(syncCommittee, SubnetId committeeIdx):
+      let validator = node.getAttachedValidator(valKey)
       if validator == nil:
         continue
 
@@ -748,15 +748,16 @@ proc handleSyncCommitteeContributions(node: BeaconNode,
     if not is_sync_committee_aggregator(selectionProof):
       continue
 
-    let contribution =
-      node.syncCommitteeMsgPool[].produceContribution(
-        slot, head, SubnetId candidateAggregators[i].committeeIdx)
+    var contribution: SyncCommitteeContribution
+    let contributionWasProduced = node.syncCommitteeMsgPool[].produceContribution(
+      slot, head, SubnetId candidateAggregators[i].committeeIdx, contribution)
 
-    asyncSpawn signAndSendContribution(
-      node,
-      candidateAggregators[i].validator,
-      contribution,
-      selectionProof)
+    if contributionWasProduced:
+      asyncSpawn signAndSendContribution(
+        node,
+        candidateAggregators[i].validator,
+        contribution,
+        selectionProof)
 
 proc handleProposal(node: BeaconNode, head: BlockRef, slot: Slot):
     Future[BlockRef] {.async.} =

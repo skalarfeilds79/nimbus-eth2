@@ -477,6 +477,14 @@ func shortLog*(v: SomeSignedBeaconBlock): auto =
     signature: shortLog(v.signature)
   )
 
+func shortLog*(v: SyncCommitteeContribution): auto =
+  (
+    slot: shortLog(v.slot),
+    blk: shortLog(v.beacon_block_root),
+    subnetId: v.subcommittee_index,
+    aggregation_bits: $v.aggregation_bits
+  )
+
 func shortLog*(v: SyncCommitteeMessage): auto =
   (
     slot: shortLog(v.slot),
