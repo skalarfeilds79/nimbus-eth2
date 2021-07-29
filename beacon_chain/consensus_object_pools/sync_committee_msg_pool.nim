@@ -9,6 +9,7 @@
 
 import
   sets,
+  chronicles,
   ../spec/digest,
   ../spec/datatypes/altair,
   ../beacon_node_types,
@@ -153,11 +154,13 @@ proc produceSyncAggregateAux(votes: BestSyncSubcommitteeContributions): SyncAggr
 proc produceSyncAggregate*(
     pool: SyncCommitteeMsgPool,
     target: BlockRef): SyncAggregate =
-  if target.root in pool.bestAggregates:
+  result = if target.root in pool.bestAggregates:
     try:
       produceSyncAggregateAux(pool.bestAggregates[target.root])
     except KeyError:
       raiseAssert "We have checked for the key upfront"
   else:
     SyncAggregate(sync_committee_signature: ValidatorSig.infinity)
+
+  debug "SyncAggregate produced", value = shortLog(result)
 

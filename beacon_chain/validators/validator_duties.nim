@@ -758,6 +758,10 @@ proc handleSyncCommitteeContributions(node: BeaconNode,
         candidateAggregators[i].validator,
         contribution,
         selectionProof)
+      debug "Sync contribution sent", contribution = shortLog(contribution)
+    else:
+      debug "Failure to produce contribution",
+            slot, head, subnet = candidateAggregators[i].committeeIdx
 
 proc handleProposal(node: BeaconNode, head: BlockRef, slot: Slot):
     Future[BlockRef] {.async.} =
