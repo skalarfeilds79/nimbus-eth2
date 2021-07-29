@@ -418,7 +418,7 @@ proc makeBeaconBlockForHeadAndSlot*(node: BeaconNode,
         node.exitPool[].getProposerSlashingsForBlock(),
         node.exitPool[].getAttesterSlashingsForBlock(),
         node.exitPool[].getVoluntaryExitsForBlock(),
-        node.sync_committee_msg_pool[].produceSyncAggregate(head.parent),
+        node.sync_committee_msg_pool[].produceSyncAggregate(head),
         default(ExecutionPayload),
         restore,
         cache)
@@ -758,7 +758,7 @@ proc handleSyncCommitteeContributions(node: BeaconNode,
         candidateAggregators[i].validator,
         contribution,
         selectionProof)
-      debug "Sync contribution sent", contribution = shortLog(contribution)
+      debug "Contribution sent", contribution = shortLog(contribution)
     else:
       debug "Failure to produce contribution",
             slot, head, subnet = candidateAggregators[i].committeeIdx

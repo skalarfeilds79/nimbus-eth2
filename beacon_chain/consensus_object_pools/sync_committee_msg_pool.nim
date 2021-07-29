@@ -162,5 +162,6 @@ proc produceSyncAggregate*(
   else:
     SyncAggregate(sync_committee_signature: ValidatorSig.infinity)
 
-  debug "SyncAggregate produced", value = shortLog(result)
+  debug "SyncAggregate produced",
+         target = target.root, value = shortLog(result)
 
