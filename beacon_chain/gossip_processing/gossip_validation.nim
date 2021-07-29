@@ -944,6 +944,7 @@ proc validateSignedContributionAndProof*(
         committeeAggKey.init(validatorPubKey)
         inc mixedKeys
       else:
+        inc mixedKeys
         committeeAggKey.aggregate(validatorPubKey)
 
     if not initialized:
@@ -953,7 +954,7 @@ proc validateSignedContributionAndProof*(
         return err((ValidationResult.Reject, cstring(
           "validateSignedContributionAndProof: aggregation bits empty")))
 
-    let cookedSignature = msg.signature.load
+    let cookedSignature = msg.message.contribution.signature.load
     if cookedSignature.isNone:
       return err((ValidationResult.Reject, cstring(
         "validateSignedContributionAndProof: aggregate signature fails to load")))
