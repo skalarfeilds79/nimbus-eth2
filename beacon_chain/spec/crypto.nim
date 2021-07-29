@@ -470,7 +470,7 @@ func init*(T: typedesc[ValidatorSig], data: array[RawSigSize, byte]): T {.noInit
   v[]
 
 func infinity*(T: type ValidatorSig): T =
-  result.blob[0] = byte 0x0C
+  result.blob[0] = byte 0xC0
 
 proc burnMem*(key: var ValidatorPrivKey) =
   ncrutils.burnMem(addr key, sizeof(ValidatorPrivKey))
