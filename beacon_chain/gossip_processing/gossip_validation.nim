@@ -924,7 +924,7 @@ proc validateSignedContributionAndProof*(
                                             genesisValidatorsRoot,
                                             aggregatorPubKey.get):
       return err((ValidationResult.Reject, cstring(
-        "validateSignedContributionAndProof: aggregator signature fails to verify")))
+        "validateSignedContributionAndProof: selection proof signature fails to verify")))
 
     # [REJECT] The aggregate signature is valid for the message beacon_block_root
     # and aggregate pubkey derived from the participation info in aggregation_bits
