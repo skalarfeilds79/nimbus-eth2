@@ -148,7 +148,7 @@ proc produceSyncAggregateAux(votes: BestSyncSubcommitteeContributions): SyncAggr
   if initialized:
     result.sync_committee_signature = aggregateSig.finish.toValidatorSig
   else:
-    result.sync_committee_signature = default(ValidatorSig)
+    result.sync_committee_signature = ValidatorSig.infinity
 
 proc produceSyncAggregate*(
     pool: SyncCommitteeMsgPool,
