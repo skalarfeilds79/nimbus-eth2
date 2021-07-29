@@ -493,4 +493,7 @@ func shortLog*(v: SyncCommitteeMessage): auto =
     signature: shortLog(v.signature)
   )
 
+func shortLog*(v: SyncAggregate): auto =
+  $(v.sync_committee_bits)
+
 chronicles.formatIt SyncCommitteeMessage: shortLog(it)
