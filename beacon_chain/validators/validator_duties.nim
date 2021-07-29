@@ -14,7 +14,7 @@ import
   # Nimble packages
   stew/[assign2, byteutils, objects],
   chronos, metrics,
-  chronicles,
+  chronicles, chronicles/timings,
   json_serialization/std/[options, sets, net], serialization/errors,
   eth/db/kvstore,
   eth/keys, eth/p2p/discoveryv5/[protocol, enr],
@@ -723,45 +723,55 @@ proc handleSyncCommitteeContributions(node: BeaconNode,
   var candidateAggregators: seq[AggregatorCandidate]
   var selectionProofs: seq[Future[ValidatorSig]]
 
-  for committeeIdx in 0 ..< SYNC_COMMITTEE_SUBNET_COUNT:
-    # TODO Hoist outside of the loop with a view type
-    #      to avoid the repeated offset calculations
-    for valKey in syncSubcommittee(syncCommittee, SubnetId committeeIdx):
-      let validator = node.getAttachedValidator(valKey)
-      if validator == nil:
+  var time = timeIt:
+    for committeeIdx in 0 ..< SYNC_COMMITTEE_SUBNET_COUNT:
+      # TODO Hoist outside of the loop with a view type
+      #      to avoid the repeated offset calculations
+      for valKey in syncSubcommittee(syncCommittee, SubnetId committeeIdx):
+        let validator = node.getAttachedValidator(valKey)
+        if validator == nil:
+          continue
+
+        candidateAggregators.add AggregatorCandidate(
+          validator: validator,
+          committeeIdx: uint64 committeeIdx)
+
+        selectionProofs.add validator.getSyncCommitteeSelectionProof(
+          fork, genesisValidatorsRoot, slot, uint64 committeeIdx)
+
+    await allFutures(selectionProofs)
+
+  debug "Prepared contributions selection proofs",
+        count = selectionProofs.len, time
+
+  var contributionsSent = 0
+  time = timeIt:
+    for i in 0 ..< selectionProofs.len:
+      if not selectionProofs[i].completed:
         continue
 
-      candidateAggregators.add AggregatorCandidate(
-        validator: validator,
-        committeeIdx: uint64 committeeIdx)
+      let selectionProof = selectionProofs[i].read
+      if not is_sync_committee_aggregator(selectionProof):
+        continue
 
-      selectionProofs.add validator.getSyncCommitteeSelectionProof(
-        fork, genesisValidatorsRoot, slot, uint64 committeeIdx)
+      var contribution: SyncCommitteeContribution
+      let contributionWasProduced = node.syncCommitteeMsgPool[].produceContribution(
+        slot, head, SubnetId candidateAggregators[i].committeeIdx, contribution)
 
-  await allFutures(selectionProofs)
-
-  for i in 0 ..< selectionProofs.len:
-    if not selectionProofs[i].completed:
-      continue
-
-    let selectionProof = selectionProofs[i].read
-    if not is_sync_committee_aggregator(selectionProof):
-      continue
-
-    var contribution: SyncCommitteeContribution
-    let contributionWasProduced = node.syncCommitteeMsgPool[].produceContribution(
-      slot, head, SubnetId candidateAggregators[i].committeeIdx, contribution)
-
-    if contributionWasProduced:
-      asyncSpawn signAndSendContribution(
-        node,
-        candidateAggregators[i].validator,
-        contribution,
-        selectionProof)
-      debug "Contribution sent", contribution = shortLog(contribution)
-    else:
-      debug "Failure to produce contribution",
-            slot, head, subnet = candidateAggregators[i].committeeIdx
+      if contributionWasProduced:
+        asyncSpawn signAndSendContribution(
+          node,
+          candidateAggregators[i].validator,
+          contribution,
+          selectionProof)
+        debug "Contribution sent", contribution = shortLog(contribution)
+        inc contributionsSent
+      else:
+        debug "Failure to produce contribution",
+              slot, head, subnet = candidateAggregators[i].committeeIdx
+  
+  debug "Sent contributions",
+        count = contributionsSent, time
 
 proc handleProposal(node: BeaconNode, head: BlockRef, slot: Slot):
     Future[BlockRef] {.async.} =
