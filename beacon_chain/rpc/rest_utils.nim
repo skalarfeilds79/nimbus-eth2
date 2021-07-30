@@ -550,21 +550,21 @@ template withStateForBlockSlot*(node: BeaconNode,
     node.dag.withState(rpcState[], blockSlot):
       body
 
-proc toValidatorIndex*(value: RestValidatorIndex): Result[ValidatorIndex,
+proc toValidatorIndex*(value: RestValidatorIndex): Result[uint64,
                                                           ValidatorIndexError] =
   when sizeof(ValidatorIndex) == 4:
     if uint64(value) < VALIDATOR_REGISTRY_LIMIT:
       # On x86 platform Nim allows only `int32` indexes, so all the indexes in
       # range `2^31 <= x < 2^32` are not supported.
       if uint64(value) <= uint64(high(int32)):
-        ok(ValidatorIndex(value))
+        ok(uint64(value))
       else:
         err(ValidatorIndexError.UnsupportedValue)
     else:
       err(ValidatorIndexError.TooHighValue)
   elif sizeof(ValidatorIndex) == 8:
     if uint64(value) < VALIDATOR_REGISTRY_LIMIT:
-      ok(ValidatorIndex(value))
+      ok(uint64(value))
     else:
       err(ValidatorIndexError.TooHighValue)
   else:

@@ -372,6 +372,10 @@ proc validateAggregate*(
     if v.isErr():
       return err(v.error)
 
+  let aggregatorIdx = aggregate_and_proof.aggregator_index
+    .validateValidatorIndexOr(pool.dag.db):
+      return errReject("Invalid aggregator index")
+
   # [IGNORE] The valid aggregate attestation defined by
   # hash_tree_root(aggregate) has not already been seen (via aggregate gossip,
   # within a verified block, or through the creation of an equivalent aggregate
@@ -434,9 +438,8 @@ proc validateAggregate*(
   # [REJECT] The aggregator's validator index is within the committee -- i.e.
   # aggregate_and_proof.aggregator_index in get_beacon_committee(state,
   # aggregate.data.slot, aggregate.data.index).
-  if aggregate_and_proof.aggregator_index.ValidatorIndex notin
-      get_beacon_committee(
-        epochRef, aggregate.data.slot, aggregate.data.index.CommitteeIndex):
+  if aggregatorIdx notin get_beacon_committee(
+      epochRef, aggregate.data.slot, aggregate.data.index.CommitteeIndex):
     return errReject(cstring(
       "Aggregator's validator index not in committee"))
 
@@ -653,7 +656,7 @@ proc isValidBeaconBlock*(
       getStateField(dag.headState.data, genesis_validators_root),
       signed_beacon_block.message.slot,
       signed_beacon_block.message,
-      dag.validatorKey(proposer.get()).get(),
+      dag.validatorKey(proposer.get()),
       signed_beacon_block.signature):
     debug "block failed signature verification",
       signature = shortLog(signed_beacon_block.signature)
@@ -784,8 +787,12 @@ proc validateSyncCommitteeMessage*(
   # i.e. subnet_id in compute_subnets_for_sync_committee(state, sync_committee_message.validator_index).
   # Note this validation implies the validator is part of the broader
   # current sync committee along with the correct subcommittee.
+  let validatorIdx = msg.validator_index.validateValidatorIndexOr(dag.db):
+    return err((ValidationResult.Reject, cstring(
+      "validateSyncCommitteeMessage: validator index out of range")))
+
   let positionInSubcommittee = dag.getSubcommitteePosition(
-    msg.slot + 1, subnetId, ValidatorIndex msg.validator_index)
+    msg.slot + 1, subnetId, validatorIdx)
 
   if positionInSubcommittee.isNone:
     return err((ValidationResult.Reject, cstring(
@@ -801,7 +808,7 @@ proc validateSyncCommitteeMessage*(
     # messages could be forwarded with the same validator_index as long as
     # the subnet_ids are distinct.
     let msgKey = SyncCommitteeMsgKey(
-      originator: ValidatorIndex msg.validator_index,
+      originator: validatorIdx,
       slot: msg.slot,
       committeeIdx: uint64 subnetId)
 
@@ -818,11 +825,7 @@ proc validateSyncCommitteeMessage*(
       epoch = msg.slot.epoch
       fork = dag.forkAtEpoch(epoch)
       genesisValidatorsRoot = dag.genesisValidatorsRoot
-      senderPubKey = dag.validatorKey(msg.validator_index)
-
-    if senderPubKey.isNone:
-      return err((ValidationResult.Reject, cstring(
-        "validateSyncCommitteeMessage: invalid validator index")))
+      senderPubKey = dag.validatorKey(validatorIdx)
 
     var cookedSignature = msg.signature.load
     if cookedSignature.isNone:
@@ -833,7 +836,7 @@ proc validateSyncCommitteeMessage*(
        not verify_sync_committee_message_signature(epoch,
                                                    msg.beacon_block_root,
                                                    fork, genesisValidatorsRoot,
-                                                   senderPubKey.get,
+                                                   senderPubKey,
                                                    cookedSignature.get):
       return err((ValidationResult.Reject, cstring(
         "validateSyncCommitteeMessage: signature fails to verify")))
@@ -855,27 +858,27 @@ proc validateSignedContributionAndProof*(
     wallTime: BeaconTime,
     checkSignature: bool):
     Result[void, (ValidationResult, cstring)] =
-  block:
-    # [IGNORE] The contribution's slot is for the current slot
-    # (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance)
-    # i.e. contribution.slot == current_slot.
-    let res = check_propagation_slot_range(msg.message.contribution.slot, wallTime)
-    if res.isErr:
-      return res
 
-  block:
-    # [REJECT] The subcommittee index is in the allowed range
-    # i.e. contribution.subcommittee_index < SYNC_COMMITTEE_SUBNET_COUNT.
-    if msg.message.contribution.subcommittee_index >= SYNC_COMMITTEE_SUBNET_COUNT:
-      return err((ValidationResult.Reject, cstring(
-        "validateSignedContributionAndProof: subcommittee index too high")))
+  # [IGNORE] The contribution's slot is for the current slot
+  # (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance)
+  # i.e. contribution.slot == current_slot.
+  ? check_propagation_slot_range(msg.message.contribution.slot, wallTime)
 
-  block:
-    # [REJECT] contribution_and_proof.selection_proof selects the validator as an aggregator for the slot
-    # i.e. is_sync_committee_aggregator(contribution_and_proof.selection_proof) returns True.
-    if not is_sync_committee_aggregator(msg.message.selection_proof):
-      return err((ValidationResult.Reject, cstring(
-        "validateSignedContributionAndProof: invalid selection_proof")))
+  let aggregatorIdx = msg.message.aggregator_index.validateValidatorIndexOr(dag.db):
+    return err((ValidationResult.Reject, cstring(
+      "validateSignedContributionAndProof: invalid aggregator index")))
+
+  # [REJECT] The subcommittee index is in the allowed range
+  # i.e. contribution.subcommittee_index < SYNC_COMMITTEE_SUBNET_COUNT.
+  let committeeIdx = msg.message.contribution.subcommittee_index.validateSyncCommitteeIndexOr:
+    return err((ValidationResult.Reject, cstring(
+      "validateSignedContributionAndProof: subcommittee index too high")))
+
+  # [REJECT] contribution_and_proof.selection_proof selects the validator as an aggregator for the slot
+  # i.e. is_sync_committee_aggregator(contribution_and_proof.selection_proof) returns True.
+  if not is_sync_committee_aggregator(msg.message.selection_proof):
+    return err((ValidationResult.Reject, cstring(
+      "validateSignedContributionAndProof: invalid selection_proof")))
 
   block:
     # [IGNORE] The sync committee contribution is the first valid contribution
@@ -884,9 +887,9 @@ proc validateSignedContributionAndProof*(
     # (this requires maintaining a cache of size SYNC_COMMITTEE_SIZE for this
     #  topic that can be flushed after each slot).
     let msgKey = SyncCommitteeMsgKey(
-      originator: ValidatorIndex msg.message.aggregator_index,
+      originator: aggregatorIdx,
       slot: msg.message.contribution.slot,
-      committeeIdx: msg.message.contribution.subcommittee_index)
+      committeeIdx: committeeIdx)
 
     if msgKey in syncCommitteeMsgPool.seenAggregateByAuthor:
       return err((ValidationResult.Ignore, cstring(
@@ -899,12 +902,8 @@ proc validateSignedContributionAndProof*(
     # of the current sync committee.
     # i.e. state.validators[contribution_and_proof.aggregator_index].pubkey in
     #      get_sync_subcommittee_pubkeys(state, contribution.subcommittee_index).
-    let aggregatorPubKey = dag.validatorKey(msg.message.aggregator_index)
-    if aggregatorPubKey.isNone:
-      return err((ValidationResult.Reject, cstring(
-        "validateSignedContributionAndProof: aggregator index too high")))
-
     let
+      aggregatorPubKey = dag.validatorKey(aggregatorIdx)
       epoch = msg.message.contribution.slot.epoch
       fork = dag.forkAtEpoch(epoch)
       genesisValidatorsRoot = dag.genesisValidatorsRoot
@@ -912,7 +911,7 @@ proc validateSignedContributionAndProof*(
     # [REJECT] The aggregator signature, signed_contribution_and_proof.signature, is valid
     if not verify_signed_contribution_and_proof_signature(msg, fork,
                                                           genesisValidatorsRoot,
-                                                          aggregatorPubKey.get):
+                                                          aggregatorPubKey):
       return err((ValidationResult.Reject, cstring(
         "validateSignedContributionAndProof: aggregator signature fails to verify")))
 
@@ -921,7 +920,7 @@ proc validateSignedContributionAndProof*(
     # index contribution_and_proof.aggregator_index.
     if not verify_selection_proof_signature(msg.message, fork,
                                             genesisValidatorsRoot,
-                                            aggregatorPubKey.get):
+                                            aggregatorPubKey):
       return err((ValidationResult.Reject, cstring(
         "validateSignedContributionAndProof: selection proof signature fails to verify")))
 
@@ -935,7 +934,7 @@ proc validateSignedContributionAndProof*(
 
     for validatorPubKey in dag.syncCommitteeParticipants(
         msg.message.contribution.slot + 1,
-        SubnetId msg.message.contribution.subcommittee_index,
+        committeeIdx,
         msg.message.contribution.aggregation_bits):
       let validatorPubKey = validatorPubKey.load.get
       if not initialized:
@@ -964,7 +963,7 @@ proc validateSignedContributionAndProof*(
          genesisValidatorsRoot, committeeAggKey.finish, cookedSignature.get):
       debug "failing_sync_contribution",
         slot = msg.message.contribution.slot + 1,
-        subnet = msg.message.contribution.subcommittee_index,
+        subnet = committeeIdx,
         participants = $(msg.message.contribution.aggregation_bits),
         mixedKeys
 

@@ -32,19 +32,13 @@ proc installValidatorApiHandlers*(router: var RestRouter, node: BeaconNode) =
           return RestApiResponse.jsonError(Http400,
                                            InvalidValidatorIndexValueError,
                                            $dres.error())
-        var res: seq[ValidatorIndex]
+        var res: seq[uint64]
         let items = dres.get()
         for item in items:
-          let vres = item.toValidatorIndex()
-          if vres.isErr():
-            case vres.error()
-            of ValidatorIndexError.TooHighValue:
-              return RestApiResponse.jsonError(Http400,
-                                               TooHighValidatorIndexValueError)
-            of ValidatorIndexError.UnsupportedValue:
-              return RestApiResponse.jsonError(Http500,
-                                            UnsupportedValidatorIndexValueError)
-          res.add(vres.get())
+          let idx = item.validateValidatorIndexOr(node.dag.db):
+            return RestApiResponse.jsonError(Http400,
+                                             TooHighValidatorIndexValueError)
+          res.add(idx)
         if len(res) == 0:
           return RestApiResponse.jsonError(Http400,
                                            EmptyValidatorIndexArrayError)
@@ -83,19 +77,18 @@ proc installValidatorApiHandlers*(router: var RestRouter, node: BeaconNode) =
             for index_in_committee, validator_index in commitee:
               if validator_index in indexList:
                 let validator_key = epochRef.validatorKey(validator_index)
-                if validator_key.isSome():
-                  res.add(
-                    RestAttesterDuty(
-                      pubkey: validator_key.get().toPubKey(),
-                      validator_index: validator_index,
-                      committee_index: CommitteeIndex(committee_index),
-                      committee_length: lenu64(commitee),
-                      committees_at_slot: committees_per_slot,
-                      validator_committee_index:
-                        ValidatorIndex(index_in_committee),
-                      slot: slot
-                    )
+                res.add(
+                  RestAttesterDuty(
+                    pubkey: validator_key.toPubKey(),
+                    validator_index: validator_index,
+                    committee_index: CommitteeIndex(committee_index),
+                    committee_length: lenu64(commitee),
+                    committees_at_slot: committees_per_slot,
+                    validator_committee_index:
+                      ValidatorIndex(index_in_committee),
+                    slot: slot
                   )
+                )
         res
     return RestApiResponse.jsonResponseWRoot(duties, droot)
 
@@ -135,7 +128,7 @@ proc installValidatorApiHandlers*(router: var RestRouter, node: BeaconNode) =
           if bp.isSome():
             res.add(
               RestProposerDuty(
-                pubkey: epochRef.validatorKey(bp.get()).get().toPubKey(),
+                pubkey: epochRef.validatorKey(bp.get).toPubKey,
                 validator_index: bp.get(),
                 slot: compute_start_slot_at_epoch(qepoch) + i
               )

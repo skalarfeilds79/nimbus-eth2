@@ -120,20 +120,20 @@ proc updateValidatorKeys*(dag: ChainDAGRef, validators: openArray[Validator]) =
   dag.db.updateImmutableValidators(validators)
 
 func validatorKey*(
-    dag: ChainDAGRef, index: ValidatorIndex or uint64): Option[CookedPubKey] =
+    dag: ChainDAGRef, index: ValidatorIndex): CookedPubKey =
   ## Returns the validator pubkey for the index, assuming it's been observed
   ## at any point in time - this function may return pubkeys for indicies that
   ## are not (yet) part of the head state (if the key has been observed on a
   ## non-head branch)!
-  dag.db.immutableValidators.byIndex.load(index)
+  dag.db.immutableValidators.byIndex.load(index).get # all validator keys are valid
 
-func validatorKey*(
-    epochRef: EpochRef, index: ValidatorIndex or uint64): Option[CookedPubKey] =
+template validatorKey*(
+    epochRef: EpochRef, index: ValidatorIndex): CookedPubKey =
   ## Returns the validator pubkey for the index, assuming it's been observed
   ## at any point in time - this function may return pubkeys for indicies that
   ## are not (yet) part of the head state (if the key has been observed on a
   ## non-head branch)!
-  epochRef.dag.validatorKey(index)
+  validatorKey(epochRef.dag, index)
 
 func init*(
     T: type EpochRef, dag: ChainDAGRef, state: StateData,
@@ -1024,12 +1024,10 @@ proc getSubcommitteePositionAux*(
     syncCommittee: openarray[ValidatorPubKey],
     committeeIdx: SubnetId,
     validatorIdx: ValidatorIndex): Option[uint64] =
-
-  let validatorKeyOpt = dag.validatorKey(validatorIdx)
-  if validatorKeyOpt.isNone:
-    return
-
-  let validatorKey = validatorKeyOpt.get.toPubKey
+  # TODO Can we avoid the key conversions by getting a compressed key
+  #      out of ImmutableValidatorData2? If we had this, we can define
+  #      the function `dag.validatorKeyBytes` and use it here.
+  let validatorKey = dag.validatorKey(validatorIdx).toPubKey
 
   for pos, key in syncCommittee.syncSubcommittee(committeeIdx):
     if validatorKey == key:
@@ -1061,9 +1059,9 @@ proc getSubcommitteePosition*(dag: ChainDAGRef,
 template syncCommitteeParticipants*(
     dag: ChainDAGRef,
     slot: Slot,
-    committeeIdx: SubnetId): seq[ValidatorPubKey] =
+    committeeIdx: SyncCommitteeIndex): seq[ValidatorPubKey] =
   let
-    startIdx = committeeIdx.int * SYNC_SUBCOMMITTEE_SIZE
+    startIdx = committeeIdx.asInt * SYNC_SUBCOMMITTEE_SIZE
     onePastEndIdx = startIdx + SYNC_SUBCOMMITTEE_SIZE
   # TODO Nim is not happy with returning an openarray here
   @(toOpenArray(dag.syncCommitteeParticipants(slot), startIdx, onePastEndIdx - 1))
@@ -1071,7 +1069,7 @@ template syncCommitteeParticipants*(
 iterator syncCommitteeParticipants*(
     dag: ChainDAGRef,
     slot: Slot,
-    committeeIdx: SubnetId,
+    committeeIdx: SyncCommitteeIndex,
     aggregationBits: SyncCommitteeAggregationBits): ValidatorPubKey =
   for pos, valIdx in pairs(dag.syncCommitteeParticipants(slot, committeeIdx)):
     if aggregationBits[pos]:

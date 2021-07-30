@@ -34,11 +34,9 @@ type
     eth1Block*: Eth2Digest
     depositContractState*: DepositContractState
 
-  RawPubKey = array[RawPubKeySize, byte]
-
   ImmutableValidatorsMemoryStore* = object
     byIndex*: seq[ImmutableValidatorData2]
-    byPubKey: Table[RawPubKey, int]
+    byPubKey: Table[ValidCompressedPubKeyBytes, ValidatorIndex]
 
   BeaconChainDBV0* = ref object
     ## BeaconChainDBV0 based on old kvstore table that sets the WITHOUT ROWID
@@ -180,12 +178,12 @@ proc `[]`*(store: var ImmutableValidatorsMemoryStore,
 proc validatorIdx*(store: ImmutableValidatorsMemoryStore,
                    key: ValidatorPubKey): ValidatorIndex
                   {.raises: [KeyError, Defect].} =
-  ValidatorIndex store.byPubKey[key.blob]
+  store.byPubKey[key.blob]
 
 proc validatorIdx*(store: ImmutableValidatorsMemoryStore,
                    key: CookedPubKey): ValidatorIndex
                   {.raises: [KeyError, Defect].} =
-  ValidatorIndex store.byPubKey[key.toPubkey.blob]
+  store.byPubKey[key.toPubkey.blob]
 
 template len*(store: ImmutableValidatorsMemoryStore): int =
   store.byIndex.len
@@ -627,6 +625,15 @@ proc getAltairBlock*(db: BeaconChainDB, key: Eth2Digest):
     result.get().root = key
   else:
     result.err()
+
+template validateValidatorIndexOr*(idxParam: uint64, dbParam: BeaconChainDB,
+                                   failureCase: untyped): ValidatorIndex =
+  let idx = idxParam
+  let db = dbParam
+  if idx <= uint64(int.max) and int(idx) < db.immutableValidators.len
+    ValidatorIndex(idx)
+  else:
+    failureCase
 
 proc getStateOnlyMutableValidators(
     immutableValidators: openArray[ImmutableValidatorData2],

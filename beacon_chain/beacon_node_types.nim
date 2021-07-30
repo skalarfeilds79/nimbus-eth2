@@ -83,7 +83,7 @@ type
   SyncCommitteeMsgKey* = object
     originator*: ValidatorIndex
     slot*: Slot
-    committeeIdx*: uint64
+    committeeIdx*: SyncCommitteeIndex
 
   TrustedSyncCommitteeMsg* = object
     slot*: Slot
@@ -188,8 +188,5 @@ type
 func shortLog*(v: AttachedValidator): string = shortLog(v.pubKey)
 
 func hash*(x: SyncCommitteeMsgKey): Hash =
-  result = result !& hash(x.originator.uint64)
-  result = result !& hash(x.slot.uint64)
-  result = result !& hash(x.committeeIdx)
-  result = !$result
+  hashData(unsafeAddr x, sizeof(x))
 

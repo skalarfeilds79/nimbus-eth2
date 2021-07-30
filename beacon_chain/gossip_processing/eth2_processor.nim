@@ -20,10 +20,6 @@ import
   ../beacon_node_types,
   ../beacon_clock
 
-from ../spec/datatypes/altair import
-  SyncCommitteeMessage,
-  SignedContributionAndProof
-
 # Metrics for tracking attestation and beacon block loss
 declareCounter beacon_attestations_received,
   "Number of beacon chain attestations received by this peer"
@@ -206,7 +202,7 @@ proc checkForPotentialDoppelganger(
     let epochRef = self.dag.getEpochRef(
       tgtBlck, attestation.data.target.epoch)
     for validatorIndex in attesterIndices:
-      let validatorPubkey = epochRef.validatorKey(validatorIndex).get().toPubKey()
+      let validatorPubkey = epochRef.validatorKey(validatorIndex).toPubKey()
       if  self.doppelgangerDetectionEnabled and
           self.validatorPool[].getValidator(validatorPubkey) !=
             default(AttachedValidator):

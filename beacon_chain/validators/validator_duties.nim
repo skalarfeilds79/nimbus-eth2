@@ -129,16 +129,12 @@ proc getAttachedValidator*(node: BeaconNode,
   # TODO Make this more optimal by adding a search by id operation
   #      in the validator pool
   let key = node.dag.validatorKey(idx)
-  if key.isSome:
-    let validator = node.getAttachedValidator(key.get().toPubKey())
-    if validator != nil and validator.index != some(idx):
-      # Update index, in case the validator was activated!
-      notice "Validator activated", pubkey = validator.pubkey, index = idx
-      validator.index = some(idx)
-    validator
-  else:
-    warn "Validator key not found", idx
-    nil
+  let validator = node.getAttachedValidator(key.toPubKey)
+  if validator != nil and validator.index != some(idx):
+    # Update index, in case the validator was activated!
+    notice "Validator activated", pubkey = validator.pubkey, index = idx
+    validator.index = some(idx)
+  validator
 
 proc isSynced*(node: BeaconNode, head: BlockRef): bool =
   ## TODO This function is here as a placeholder for some better heurestics to
@@ -787,7 +783,7 @@ proc handleProposal(node: BeaconNode, head: BlockRef, slot: Slot):
     return head
 
   let
-    proposerKey = node.dag.validatorKey(proposer.get()).get().toPubKey()
+    proposerKey = node.dag.validatorKey(proposer.get).toPubKey
     validator = node.attachedValidators[].getValidator(proposerKey)
 
   if validator != nil:

@@ -444,11 +444,13 @@ proc getAttachedValidators(node: BeaconNode):
     Table[ValidatorIndex, AttachedValidator] =
   for validatorIndex in 0 ..<
       getStateField(node.dag.headState.data, validators).len:
-    let attachedValidator = node.getAttachedValidator(
-      validatorIndex.ValidatorIndex)
+    let validatorIndex = IHaveVerifiedThisValue(ValidatorIndex, validatorIndex)
+      ## This index is obviously correct because we are iterating over
+      ## `state.validators`
+    let attachedValidator = node.getAttachedValidator(validatorIndex)
     if attachedValidator.isNil:
       continue
-    result[validatorIndex.ValidatorIndex] = attachedValidator
+    result[validatorIndex] = attachedValidator
 
 proc updateSubscriptionSchedule(node: BeaconNode, epoch: Epoch) {.async.} =
   doAssert epoch >= 1
@@ -475,7 +477,7 @@ proc updateSubscriptionSchedule(node: BeaconNode, epoch: Epoch) {.async.} =
       validatorIndices,
       is_aggregator(
         committeeLen,
-        await attachedValidators[it.ValidatorIndex].getSlotSig(
+        await attachedValidators[it].getSlotSig(
           getStateField(node.dag.headState.data, fork),
           getStateField(
             node.dag.headState.data, genesis_validators_root), slot)))
