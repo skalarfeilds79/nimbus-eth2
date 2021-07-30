@@ -947,3 +947,4 @@ template isomorphicCast*[T, U](x: U): T =
     doAssert sizeof(T) == sizeof(U)
     doAssert getSizeofSig(T()) == getSizeofSig(U())
   cast[ptr T](unsafeAddr x)[]
+
