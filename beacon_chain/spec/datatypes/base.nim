@@ -683,6 +683,19 @@ proc `<`*(x, y: ValidatorIndex) : bool {.borrow, noSideEffect.}
 proc hash*(x: ValidatorIndex): Hash {.borrow, noSideEffect.}
 func `$`*(x: ValidatorIndex): auto = $(distinctBase(x))
 
+template `==`*(x: uint64, y: ValidatorIndex): bool =
+  x == y.uint64
+
+template `==`*(x: ValidatorIndex, y: uint64): bool =
+  x.uint64 == y
+
+template asUInt64*(x: ValidatorIndex): uint64 =
+  uint64(distinctBase(x))
+
+template IHaveVerifiedThis*(T: type ValidatorIndex, x: untyped,
+                            explanation: static string): ValidatorIndex =
+  ValidatorIndex(x)
+
 # TODO Nim 1.4, but not Nim 1.2, defines a function by this name, which works
 # only on openArray[int]. They do the same thing, so either's fine, when both
 # overloads match. The Nim 1.4 stdlib doesn't int-convert but it's a no-op in

@@ -103,9 +103,7 @@ func get_attesting_indices_one*(epochRef: EpochRef,
 # https://github.com/ethereum/eth2.0-specs/blob/v1.0.1/specs/phase0/beacon-chain.md#get_attesting_indices
 func get_attesting_indices*(epochRef: EpochRef,
                             data: AttestationData,
-                            bits: CommitteeValidatorsBits):
-                              seq[ValidatorIndex] =
-  # TODO sequtils2 mapIt
+                            bits: CommitteeValidatorsBits): seq[ValidatorIndex] =
   for idx in get_attesting_indices(epochRef, data, bits):
     result.add(idx)
 

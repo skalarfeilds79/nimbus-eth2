@@ -19,6 +19,7 @@ import
 export tables, hashes, block_pools_types
 
 from ./spec/datatypes/altair import
+  SyncCommitteeIndex,
   SyncCommitteeAggregationBits,
   SYNC_COMMITTEE_SUBNET_COUNT
 
@@ -87,8 +88,8 @@ type
 
   TrustedSyncCommitteeMsg* = object
     slot*: Slot
-    subnetId*: SubnetId
-    positionInSubnet*: uint64
+    committeeIdx*: SyncCommitteeIndex
+    positionInCommittee*: uint64
     signature*: CookedSig
 
   BestSyncSubcommitteeContribution* = object

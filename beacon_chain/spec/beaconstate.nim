@@ -279,9 +279,9 @@ proc initialize_beacon_state_from_eth1*(
         if not state.balances.add(amount):
           raiseAssert "same as validators"
         pubkeyToIndex[pubkey] =
-          IHaveVerifiedThis(ValidatorIndex, nextValidatorIdx)
-            ## This index is obviously correct because we have just added
-            ## the new validator to the state.
+          IHaveVerifiedThis(ValidatorIndex, nextValidatorIdx, """
+            This index is obviously correct because we have just added
+            the new validator to the state. """)
       else:
         # Invalid deposits are perfectly possible
         trace "Skipping deposit with invalid signature",
@@ -371,10 +371,10 @@ func is_eligible_for_activation(state: SomeBeaconState, validator: Validator):
   # Has not yet been activated
     validator.activation_epoch == FAR_FUTURE_EPOCH
 
-iterator validatorIndices(state: var SomeBeaconState): ValidatorIndex =
+iterator validatorIndices*(state: SomeBeaconState): ValidatorIndex =
   for i in 0 ..< state.validators.len:
-    yield IHaveVerifiedThis(ValidatorIndex, i)
-      ## This is obviously a valid index
+    yield IHaveVerifiedThis(ValidatorIndex, i,
+                            "This is obviously a valid index")
 
 # https://github.com/ethereum/eth2.0-specs/blob/v1.0.1/specs/phase0/beacon-chain.md#registry-updates
 proc process_registry_updates*(

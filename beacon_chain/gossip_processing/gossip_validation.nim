@@ -23,7 +23,7 @@ import
     spec_cache, blockchain_dag, block_quarantine, spec_cache,
     attestation_pool, exit_pool, sync_committee_msg_pool
   ],
-  ".."/[beacon_node_types, ssz, beacon_clock],
+  ".."/[beacon_node_types, ssz, beacon_clock, beacon_chain_db],
   ../validators/attestation_aggregation,
   ../extras,
   ./batch_validation
@@ -165,7 +165,7 @@ template errReject(msg: cstring): untyped =
     # an internal consistency/correctness check only, and effectively never has
     # false positives. These don't, for example, arise from timeouts.
     doAssert false
-  err((ValidationResult.Reject, msg))
+  err((ValidationResult.Reject, cstring msg))
 
 template errReject(error: (ValidationResult, cstring)): untyped =
   doAssert error[0] == ValidationResult.Reject
@@ -242,8 +242,7 @@ proc validateAttestation*(
   # [REJECT] The committee index is within the expected range -- i.e.
   # data.index < get_committee_count_per_slot(state, data.target.epoch).
   if not (attestation.data.index < get_committee_count_per_slot(epochRef)):
-    return errReject(cstring(
-      "validateAttestation: committee index not within expected range"))
+    return errReject("validateAttestation: committee index not within expected range")
 
   # [REJECT] The attestation is for the correct subnet -- i.e.
   # compute_subnet_for_attestation(committees_per_slot,
@@ -265,8 +264,7 @@ proc validateAttestation*(
   # attestation.data.beacon_block_root.
   if not (attestation.aggregation_bits.lenu64 == get_beacon_committee_len(
       epochRef, attestation.data.slot, attestation.data.index.CommitteeIndex)):
-    return errReject(cstring(
-      "validateAttestation: number of aggregation bits and committee size mismatch"))
+    return errReject("validateAttestation: number of aggregation bits and committee size mismatch")
 
   let
     fork = pool.dag.forkAtEpoch(attestation.data.slot.epoch)
@@ -317,7 +315,7 @@ proc validateAttestation*(
       var x = (await cryptoFut)
       case x
       of BatchResult.Invalid:
-        return errReject(cstring("validateAttestation: invalid signature"))
+        return errReject("validateAttestation: invalid signature")
       of BatchResult.Timeout:
         beacon_attestations_dropped_queue_full.inc()
         return err((ValidationResult.Ignore, cstring("validateAttestation: timeout checking signature")))
@@ -433,15 +431,14 @@ proc validateAggregate*(
   if not is_aggregator(
       epochRef, aggregate.data.slot, aggregate.data.index.CommitteeIndex,
       aggregate_and_proof.selection_proof):
-    return errReject(cstring("Incorrect aggregator"))
+    return errReject("Incorrect aggregator")
 
   # [REJECT] The aggregator's validator index is within the committee -- i.e.
   # aggregate_and_proof.aggregator_index in get_beacon_committee(state,
   # aggregate.data.slot, aggregate.data.index).
   if aggregatorIdx notin get_beacon_committee(
       epochRef, aggregate.data.slot, aggregate.data.index.CommitteeIndex):
-    return errReject(cstring(
-      "Aggregator's validator index not in committee"))
+    return errReject("Aggregator's validator index not in committee")
 
   # 1. [REJECT] The aggregate_and_proof.selection_proof is a valid signature of the
   #    aggregate.data.slot by the validator with index
@@ -471,7 +468,7 @@ proc validateAggregate*(
     var x = await cryptoFuts.slotCheck
     case x
     of BatchResult.Invalid:
-      return errReject(cstring("validateAggregate: invalid slot signature"))
+      return errReject("validateAggregate: invalid slot signature")
     of BatchResult.Timeout:
       beacon_aggregates_dropped_queue_full.inc()
       return err((ValidationResult.Reject, cstring("validateAggregate: timeout checking slot signature")))
@@ -483,8 +480,7 @@ proc validateAggregate*(
     var x = await cryptoFuts.aggregatorCheck
     case x
     of BatchResult.Invalid:
-      return errReject(cstring(
-        "validateAggregate: invalid aggregator signature"))
+      return errReject("validateAggregate: invalid aggregator signature")
     of BatchResult.Timeout:
       beacon_aggregates_dropped_queue_full.inc()
       return err((ValidationResult.Reject, cstring("validateAggregate: timeout checking aggregator signature")))
@@ -496,8 +492,7 @@ proc validateAggregate*(
     var x = await cryptoFuts.aggregateCheck
     case x
     of BatchResult.Invalid:
-      return errReject(cstring(
-        "validateAggregate: invalid aggregate signature"))
+      return errReject("validateAggregate: invalid aggregate signature")
     of BatchResult.Timeout:
       beacon_aggregates_dropped_queue_full.inc()
       return err((ValidationResult.Reject, cstring("validateAggregate: timeout checking aggregate signature")))
@@ -771,7 +766,7 @@ proc validateSyncCommitteeMessage*(
     dag: ChainDAGRef,
     syncCommitteeMsgPool: SyncCommitteeMsgPoolRef,
     msg: SyncCommitteeMessage,
-    subnetId: SubnetId,
+    syncCommitteeIdx: SyncCommitteeIndex,
     wallTime: BeaconTime,
     checkSignature: bool):
     Result[void, (ValidationResult, cstring)] =
@@ -792,7 +787,7 @@ proc validateSyncCommitteeMessage*(
       "validateSyncCommitteeMessage: validator index out of range")))
 
   let positionInSubcommittee = dag.getSubcommitteePosition(
-    msg.slot + 1, subnetId, validatorIdx)
+    msg.slot + 1, syncCommitteeIdx, validatorIdx)
 
   if positionInSubcommittee.isNone:
     return err((ValidationResult.Reject, cstring(
@@ -810,7 +805,7 @@ proc validateSyncCommitteeMessage*(
     let msgKey = SyncCommitteeMsgKey(
       originator: validatorIdx,
       slot: msg.slot,
-      committeeIdx: uint64 subnetId)
+      committeeIdx: syncCommitteeIdx)
 
     if msgKey in syncCommitteeMsgPool.seenByAuthor:
       return err((ValidationResult.Ignore, cstring(
@@ -845,7 +840,7 @@ proc validateSyncCommitteeMessage*(
       msg.slot,
       msg.beacon_block_root,
       cookedSignature.get,
-      subnetId,
+      syncCommitteeIdx,
       positionInSubcommittee.get)
 
   ok()

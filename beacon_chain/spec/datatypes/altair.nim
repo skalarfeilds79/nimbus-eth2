@@ -444,10 +444,17 @@ when false:
 chronicles.formatIt BeaconBlock: it.shortLog
 chronicles.formatIt SyncCommitteeIndex: uint8(it)
 
-template asInt*(x: SyncCommitteeIndex): int =
-  int(x)
+template asInt*(x: SyncCommitteeIndex): int = int(x)
+template asUInt8*(x: SyncCommitteeIndex): uint8 = uint8(x)
+template asUInt64*(x: SyncCommitteeIndex): uint64 = uint64(x)
 
-template validateSyncCommitteeIndex*(networkValParam: uint64, elseBody: untyped) =
+proc `==`*(lhs, rhs: SyncCommitteeIndex): bool {.borrow, noSideEffect.}
+
+iterator allSyncCommittees*: SyncCommitteeIndex =
+  for committeeIdx in 0 ..< SYNC_COMMITTEE_SUBNET_COUNT:
+    yield SyncCommitteeIndex(committeeIdx)
+
+template validateSyncCommitteeIndexOr*(networkValParam: uint64, elseBody: untyped) =
   let networkVal = networkValParam
   if networkVal < SYNC_COMMITTEE_SUBNET_COUNT:
     SyncCommitteeIndex(networkVal)

@@ -17,20 +17,20 @@ Json.createFlavor RestJson
 type
   RestAttesterDuty* = object
     pubkey*: ValidatorPubKey
-    validator_index*: ValidatorIndex
+    validator_index*: RestValidatorIndex
     committee_index*: CommitteeIndex
     committee_length*: uint64
     committees_at_slot*: uint64
-    validator_committee_index*: ValidatorIndex
+    validator_committee_index*: RestValidatorIndex
     slot*: Slot
 
   RestProposerDuty* = object
     pubkey*: ValidatorPubKey
-    validator_index*: ValidatorIndex
+    validator_index*: RestValidatorIndex
     slot*: Slot
 
   RestCommitteeSubscription* = object
-    validator_index*: ValidatorIndex
+    validator_index*: RestValidatorIndex
     committee_index*: CommitteeIndex
     committees_at_slot*: uint64
     slot*: Slot
@@ -42,20 +42,20 @@ type
     genesis_fork_version*: Version
 
   RestValidatorBalance* = object
-    index*: ValidatorIndex
+    index*: RestValidatorIndex
     balance*: string
 
   RestBeaconStatesCommittees* = object
     index*: CommitteeIndex
     slot*: Slot
-    validators*: seq[ValidatorIndex]
+    validators*: seq[RestValidatorIndex]
 
   RestAttestationsFailure* = object
     index*: uint64
     message*: string
 
   RestValidator* = object
-    index*: ValidatorIndex
+    index*: RestValidatorIndex
     balance*: string
     status*: string
     validator*: Validator
@@ -161,7 +161,7 @@ type
   DataRestConfig* = DataEnclosedObject[RestConfig]
 
   EncodeTypes* = phase0.SignedBeaconBlock
-  EncodeArrays* = seq[ValidatorIndex] | seq[Attestation] |
+  EncodeArrays* = seq[RestValidatorIndex] | seq[ValidatorIndex] | seq[Attestation] |
                   seq[SignedAggregateAndProof] | seq[RestCommitteeSubscription]
 
   DecodeTypes* = DataRestBeaconGenesis | DataRestFork | DataRestProposerDuties |
@@ -365,19 +365,9 @@ proc writeValue*(writer: var JsonWriter[RestJson], value: ValidatorIndex) {.
      raises: [IOError, Defect].} =
   writeValue(writer, Base10.toString(uint64(value)))
 
-proc readValue*(reader: var JsonReader[RestJson], value: var ValidatorIndex) {.
-     raises: [IOError, SerializationError, Defect].} =
-  let svalue = reader.readValue(string)
-  let res = Base10.decode(uint64, svalue)
-  if res.isOk():
-    let v = res.get()
-    if v < VALIDATOR_REGISTRY_LIMIT:
-      value = ValidatorIndex(v)
-    else:
-      reader.raiseUnexpectedValue(
-        "Validator index is bigger then VALIDATOR_REGISTRY_LIMIT")
-  else:
-    reader.raiseUnexpectedValue($res.error())
+proc readValue*(reader: var JsonReader[RestJson], value: var ValidatorIndex)
+               {.error: "Types such as `ValidatorIndex` have to be subjected to validation." &
+                        "For this reason, they cannot appear in REST API input structures".}
 
 ## RestValidatorIndex
 proc writeValue*(writer: var JsonWriter[RestJson],

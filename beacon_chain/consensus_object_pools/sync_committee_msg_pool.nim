@@ -33,8 +33,8 @@ proc addSyncCommitteeMsg*(
     slot: Slot,
     beaconBlockRoot: Eth2Digest,
     signature: CookedSig,
-    subnetId: SubnetId,
-    positionInSubnet: uint64) =
+    committeeIdx: SyncCommitteeIndex,
+    positionInCommittee: uint64) =
 
   if beaconBlockRoot notin pool.blockVotes:
     pool.blockVotes[beaconBlockRoot] = @[]
@@ -42,21 +42,21 @@ proc addSyncCommitteeMsg*(
   try:
     pool.blockVotes[beaconBlockRoot].add TrustedSyncCommitteeMsg(
       slot: slot,
-      subnetId: subnetId,
-      positionInSubnet: positionInSubnet,
+      committeeIdx: committeeIdx,
+      positionInCommittee: positionInCommittee,
       signature: signature)
   except KeyError:
     raiseAssert "We have checked for the key upfront"
 
 proc computeAggregateSig(votes: seq[TrustedSyncCommitteeMsg],
-                         subnetId: SubnetId,
+                         committeeIdx: SyncCommitteeIndex,
                          contribution: var SyncCommitteeContribution): bool =
   var
     aggregateSig {.noInit.}: AggregateSignature
     initialized = false
 
   for vote in votes:
-    if vote.subnetId != subnetId:
+    if vote.committeeIdx != committeeIdx:
       continue
 
     if not initialized:
@@ -65,7 +65,7 @@ proc computeAggregateSig(votes: seq[TrustedSyncCommitteeMsg],
     else:
       aggregateSig.aggregate(vote.signature)
 
-    contribution.aggregation_bits.setBit vote.positionInSubnet
+    contribution.aggregation_bits.setBit vote.positionInCommittee
 
   if initialized:
     contribution.signature = aggregateSig.finish.toValidatorSig
@@ -76,15 +76,15 @@ proc produceContribution*(
     pool: SyncCommitteeMsgPool,
     slot: Slot,
     head: BlockRef,
-    subnetId: SubnetId,
+    committeeIdx: SyncCommitteeIndex,
     outContribution: var SyncCommitteeContribution): bool =
   if head.root in pool.blockVotes:
     outContribution.slot = slot
     outContribution.beacon_block_root = head.root
-    outContribution.subcommittee_index = uint64 subnetId
+    outContribution.subcommittee_index = committeeIdx.asUInt64
     try:
       return computeAggregateSig(pool.blockVotes[head.root],
-                                 subnetId,
+                                 committeeIdx,
                                  outContribution)
     except KeyError:
       raiseAssert "We have checked for the key upfront"

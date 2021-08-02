@@ -192,18 +192,18 @@ proc sendAttestation*(
 
 proc sendSyncCommitteeMessage*(
     node: BeaconNode, msg: SyncCommitteeMessage,
-    subnetId: SubnetId, checkSignature: bool): Future[bool] {.async.} =
+    committeeIdx: SyncCommitteeIndex, checkSignature: bool): Future[bool] {.async.} =
   # Validate sync committee message before sending it via gossip
   # validation will also register the message with the sync committee
   # message pool. Notably, although libp2p calls the data handler for
   # any subscription on the subnet topic, it does not perform validation.
   let ok = node.processor.syncCommitteeMsgValidator(
-    msg, subnetId, checkSignature)
+    msg, committeeIdx, checkSignature)
 
   return case ok
     of ValidationResult.Accept:
       node.network.broadcast(
-        getSyncCommitteeTopic(node.dag.forkDigests.altair, subnet_id),
+        getSyncCommitteeTopic(node.dag.forkDigests.altair, committeeIdx),
         msg)
       beacon_sync_committee_messages_sent.inc()
       true
@@ -632,7 +632,7 @@ proc handleAttestations(node: BeaconNode, head: BlockRef, slot: Slot) =
 proc createAndSendSyncCommitteeMessage(node: BeaconNode,
                                        slot: Slot,
                                        validator: AttachedValidator,
-                                       subnetId: SubnetId,
+                                       committeeIdx: SyncCommitteeIndex,
                                        head: BlockRef) {.async.} =
   try:
     let
@@ -642,7 +642,7 @@ proc createAndSendSyncCommitteeMessage(node: BeaconNode,
                                            genesisValidatorsRoot, head.root)
 
     let ok = await node.sendSyncCommitteeMessage(
-      msg, subnetId, checkSignature = false)
+      msg, committeeIdx, checkSignature = false)
     if not ok: # Logged in sendSyncCommitteeMessage
       return
 
@@ -675,13 +675,13 @@ proc handleSyncCommitteeMessages(node: BeaconNode, head: BlockRef, slot: Slot) =
   # TODO Use a view type to avoid the copy
   var syncCommittee = @(node.dag.syncCommitteeParticipants(slot + 1))
 
-  for subnetIdx in 0 ..< SYNC_COMMITTEE_SUBNET_COUNT:
-    for valKey in syncSubcommittee(syncCommittee, SubnetId subnetIdx):
+  for committeeIdx in allSyncCommittees():
+    for valKey in syncSubcommittee(syncCommittee, committeeIdx):
       let validator = node.getAttachedValidator(valKey)
       if validator == nil or not validator.isActivated:
         continue
       asyncSpawn createAndSendSyncCommitteeMessage(node, slot, validator,
-                                                   SubnetId subnetIdx, head)
+                                                   committeeIdx, head)
 
 proc signAndSendContribution(node: BeaconNode,
                              validator: AttachedValidator,
@@ -717,26 +717,26 @@ proc handleSyncCommitteeContributions(node: BeaconNode,
   type
     AggregatorCandidate = object
       validator: AttachedValidator
-      committeeIdx: uint64
+      committeeIdx: SyncCommitteeIndex
 
   var candidateAggregators: seq[AggregatorCandidate]
   var selectionProofs: seq[Future[ValidatorSig]]
 
   var time = timeIt:
-    for committeeIdx in 0 ..< SYNC_COMMITTEE_SUBNET_COUNT:
+    for committeeIdx in allSyncCommittees():
       # TODO Hoist outside of the loop with a view type
       #      to avoid the repeated offset calculations
-      for valKey in syncSubcommittee(syncCommittee, SubnetId committeeIdx):
+      for valKey in syncSubcommittee(syncCommittee, committeeIdx):
         let validator = node.getAttachedValidator(valKey)
         if validator == nil:
           continue
 
         candidateAggregators.add AggregatorCandidate(
           validator: validator,
-          committeeIdx: uint64 committeeIdx)
+          committeeIdx: committeeIdx)
 
         selectionProofs.add validator.getSyncCommitteeSelectionProof(
-          fork, genesisValidatorsRoot, slot, uint64 committeeIdx)
+          fork, genesisValidatorsRoot, slot, committeeIdx.asUInt64)
 
     await allFutures(selectionProofs)
 
@@ -755,7 +755,7 @@ proc handleSyncCommitteeContributions(node: BeaconNode,
 
       var contribution: SyncCommitteeContribution
       let contributionWasProduced = node.syncCommitteeMsgPool[].produceContribution(
-        slot, head, SubnetId candidateAggregators[i].committeeIdx, contribution)
+        slot, head, candidateAggregators[i].committeeIdx, contribution)
 
       if contributionWasProduced:
         asyncSpawn signAndSendContribution(

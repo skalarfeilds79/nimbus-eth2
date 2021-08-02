@@ -11,6 +11,9 @@ import
   "."/[digest, helpers, forkedbeaconstate_helpers],
   "."/datatypes/base
 
+from ./datatypes/altair import
+  SyncCommitteeIndex, asUInt8
+
 const
   # https://github.com/ethereum/eth2.0-specs/blob/v1.0.1/specs/phase0/p2p-interface.md#topics-and-messages
   topicBeaconBlocksSuffix* = "beacon_block/ssz"
@@ -73,15 +76,15 @@ func compute_subnet_for_attestation*(
 
 # https://github.com/ethereum/eth2.0-specs/blob/v1.0.1/specs/phase0/validator.md#broadcast-attestation
 func getAttestationTopic*(forkDigest: ForkDigest,
-                          subnet_id: SubnetId): string =
+                          subnetId: SubnetId): string =
   ## For subscribing and unsubscribing to/from a subnet.
-  eth2Prefix(forkDigest) & "beacon_attestation_" & $uint64(subnet_id) & "/ssz"
+  eth2Prefix(forkDigest) & "beacon_attestation_" & $(subnetId) & "/ssz"
 
 # https://github.com/ethereum/eth2.0-specs/blob/v1.1.0-alpha.8/specs/altair/p2p-interface.md#topics-and-messages
 func getSyncCommitteeTopic*(forkDigest: ForkDigest,
-                            subnet_id: SubnetId): string =
+                            committeeIdx: SyncCommitteeIndex): string =
   ## For subscribing and unsubscribing to/from a subnet.
-  eth2Prefix(forkDigest) & "sync_committee_" & $uint64(subnet_id) & "/ssz"
+  eth2Prefix(forkDigest) & "sync_committee_" & $(committeeIdx.asUInt8) & "/ssz"
 
 # https://github.com/ethereum/eth2.0-specs/blob/v1.1.0-alpha.8/specs/altair/p2p-interface.md#topics-and-messages
 func getSyncCommitteeContributionAndProofTopic*(forkDigest: ForkDigest): string =

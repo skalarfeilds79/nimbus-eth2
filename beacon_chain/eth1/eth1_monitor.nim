@@ -221,12 +221,12 @@ when hasGenesisDetection:
           pubkey: pubkey,
           withdrawal_credentials: deposit.withdrawal_credentials)
         m.genesisValidatorKeyToIndex[pubkey] =
-          IHaveVerifiedThisValue(ValidatorIndex, idx)
-            ## This is the index of the last item that was just added
-            ## to the table. Since the history of Eth1 is assumed to
-            ## be immutable due to the large follow distance, we know
-            ## that the ValidatorIndex will remain the same on the
-            ## beacon chain.
+          IHaveVerifiedThisValue(ValidatorIndex, idx, """
+            This is the index of the last item that was just added
+            to the table. Since the history of Eth1 is assumed to
+            be immutable due to the large follow distance, we know
+            that the ValidatorIndex will remain the same on the
+            beacon chain. """)
 
   proc processGenesisDeposit*(m: Eth1Monitor, newDeposit: DepositData) =
     m.db.genesisDeposits.add newDeposit

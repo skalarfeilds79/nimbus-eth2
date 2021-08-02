@@ -15,6 +15,7 @@ import
   ../spec/[crypto, digest, forkedbeaconstate_helpers, network],
   ../spec/datatypes/base,
   ../ssz/merkleization,
+  ../beacon_chain_db,
   ./eth2_json_rest_serialization, ./rest_utils
 
 logScope: topics = "rest_validatorapi"
@@ -32,10 +33,10 @@ proc installValidatorApiHandlers*(router: var RestRouter, node: BeaconNode) =
           return RestApiResponse.jsonError(Http400,
                                            InvalidValidatorIndexValueError,
                                            $dres.error())
-        var res: seq[uint64]
+        var res: seq[ValidatorIndex]
         let items = dres.get()
         for item in items:
-          let idx = item.validateValidatorIndexOr(node.dag.db):
+          let idx = uint64(item).validateValidatorIndexOr(node.dag.db):
             return RestApiResponse.jsonError(Http400,
                                              TooHighValidatorIndexValueError)
           res.add(idx)
@@ -80,12 +81,11 @@ proc installValidatorApiHandlers*(router: var RestRouter, node: BeaconNode) =
                 res.add(
                   RestAttesterDuty(
                     pubkey: validator_key.toPubKey(),
-                    validator_index: validator_index,
+                    validator_index: validator_index.toRestType,
                     committee_index: CommitteeIndex(committee_index),
                     committee_length: lenu64(commitee),
                     committees_at_slot: committees_per_slot,
-                    validator_committee_index:
-                      ValidatorIndex(index_in_committee),
+                    validator_committee_index: RestValidatorIndex(index_in_committee),
                     slot: slot
                   )
                 )
@@ -129,7 +129,7 @@ proc installValidatorApiHandlers*(router: var RestRouter, node: BeaconNode) =
             res.add(
               RestProposerDuty(
                 pubkey: epochRef.validatorKey(bp.get).toPubKey,
-                validator_index: bp.get(),
+                validator_index: bp.get.toRestType,
                 slot: compute_start_slot_at_epoch(qepoch) + i
               )
             )
@@ -312,9 +312,8 @@ proc installValidatorApiHandlers*(router: var RestRouter, node: BeaconNode) =
                                          InvalidCommitteeIndexValueError)
       let validator_pubkey =
         block:
-          let idx = request.validator_index
-          if uint64(idx) >=
-                           lenu64(getStateField(node.dag.headState.data, validators)):
+          let idx = uint64(request.validator_index)
+          if idx >= lenu64(getStateField(node.dag.headState.data, validators)):
             return RestApiResponse.jsonError(Http400,
                                              InvalidValidatorIndexValueError)
           getStateField(node.dag.headState.data, validators)[idx].pubkey

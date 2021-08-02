@@ -202,7 +202,7 @@ proc checkForPotentialDoppelganger(
     let epochRef = self.dag.getEpochRef(
       tgtBlck, attestation.data.target.epoch)
     for validatorIndex in attesterIndices:
-      let validatorPubkey = epochRef.validatorKey(validatorIndex).toPubKey()
+      let validatorPubkey = self.dag.validatorKey(validatorIndex).toPubKey()
       if  self.doppelgangerDetectionEnabled and
           self.validatorPool[].getValidator(validatorPubkey) !=
             default(AttachedValidator):
@@ -357,7 +357,7 @@ proc voluntaryExitValidator*(
 proc syncCommitteeMsgValidator*(
     self: ref Eth2Processor,
     syncCommitteeMsg: SyncCommitteeMessage,
-    subnet_id: SubnetId,
+    committeeIdx: SyncCommitteeIndex,
     checkSignature: bool = true): ValidationResult =
   let wallTime = self.getCurrentBeaconTime()
 
@@ -368,7 +368,7 @@ proc syncCommitteeMsgValidator*(
 
   # Now proceed to validation
   let v = validateSyncCommitteeMessage(self.dag, self.syncCommitteeMsgPool,
-                                       syncCommitteeMsg, subnet_id, wallTime,
+                                       syncCommitteeMsg, committeeIdx, wallTime,
                                        checkSignature)
   if v.isErr():
     debug "Dropping sync committee message", validationError = v.error

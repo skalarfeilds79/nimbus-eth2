@@ -149,20 +149,7 @@ func init*(
         getStateField(state.data, current_justified_checkpoint),
       finalized_checkpoint: getStateField(state.data, finalized_checkpoint),
       shuffled_active_validator_indices:
-        cache.get_shuffled_active_validator_indices(state.data, epoch),
-      sync_committee:
-        case state.data.beaconStateFork
-        of forkAltair:
-          mapIt(
-            state.data.hbsAltair.data.current_sync_committee.pubkeys,
-            block:
-              try:
-                dag.db.immutableValidators.validatorIdx(it)
-              except KeyError:
-                raiseAssert "the validator keys are valid"
-          )
-        of forkPhase0:
-          @[]
+        cache.get_shuffled_active_validator_indices(state.data, epoch)
       )
 
   for i in 0'u64..<SLOTS_PER_EPOCH:
@@ -978,14 +965,14 @@ proc pruneBlocksDAG(dag: ChainDAGRef) =
     dagPruneDur = Moment.now() - startTick
 
 proc syncSubcommittee*(syncCommittee: openarray[ValidatorPubKey],
-                       subnetId: SubnetId): seq[ValidatorPubKey] =
+                       committeeIdx: SyncCommitteeIndex): seq[ValidatorPubKey] =
   ## TODO Return a view type
   ## Unfortunately, this doesn't work as a template right now.
   if syncCommittee.len == 0:
     return @[]
 
   let
-    startIdx = subnetId.int * SYNC_SUBCOMMITTEE_SIZE
+    startIdx = committeeIdx.asInt * SYNC_SUBCOMMITTEE_SIZE
     onePastEndIdx = startIdx + SYNC_SUBCOMMITTEE_SIZE
   doAssert startIdx < syncCommittee.len
 
@@ -1022,7 +1009,7 @@ proc syncCommitteeParticipants*(dagParam: ChainDAGRef,
 proc getSubcommitteePositionAux*(
     dag: ChainDAGRef,
     syncCommittee: openarray[ValidatorPubKey],
-    committeeIdx: SubnetId,
+    committeeIdx: SyncCommitteeIndex,
     validatorIdx: ValidatorIndex): Option[uint64] =
   # TODO Can we avoid the key conversions by getting a compressed key
   #      out of ImmutableValidatorData2? If we had this, we can define
@@ -1035,7 +1022,7 @@ proc getSubcommitteePositionAux*(
 
 proc getSubcommitteePosition*(dag: ChainDAGRef,
                               slot: Slot,
-                              committeeIdx: SubnetId,
+                              committeeIdx: SyncCommitteeIndex,
                               validatorIdx: ValidatorIndex): Option[uint64] =
   if dag.headState.data.beaconStateFork == forkPhase0:
     return

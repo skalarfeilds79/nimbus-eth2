@@ -444,9 +444,9 @@ proc getAttachedValidators(node: BeaconNode):
     Table[ValidatorIndex, AttachedValidator] =
   for validatorIndex in 0 ..<
       getStateField(node.dag.headState.data, validators).len:
-    let validatorIndex = IHaveVerifiedThisValue(ValidatorIndex, validatorIndex)
-      ## This index is obviously correct because we are iterating over
-      ## `state.validators`
+    let validatorIndex = IHaveVerifiedThis(ValidatorIndex, validatorIndex, """
+      This index is obviously correct because we are iterating over
+      `state.validators` """)
     let attachedValidator = node.getAttachedValidator(validatorIndex)
     if attachedValidator.isNil:
       continue
@@ -477,7 +477,7 @@ proc updateSubscriptionSchedule(node: BeaconNode, epoch: Epoch) {.async.} =
       validatorIndices,
       is_aggregator(
         committeeLen,
-        await attachedValidators[it].getSlotSig(
+        await attachedValidators[it.ValidatorIndex].getSlotSig(
           getStateField(node.dag.headState.data, fork),
           getStateField(
             node.dag.headState.data, genesis_validators_root), slot)))
@@ -809,12 +809,12 @@ proc addAltairMessageHandlers(node: BeaconNode, slot: Slot)
   var syncnets: BitArray[SYNC_COMMITTEE_SUBNET_COUNT]
 
   # TODO: What are the best topic params for this?
-  for it in 0'u64 ..< SYNC_COMMITTEE_SUBNET_COUNT.uint64:
+  for committeeIdx in allSyncCommittees():
     closureScope:
-      let subnet_id = SubnetId(it)
+      let idx = committeeIdx
       # TODO This should be done in dynamic way in trackSyncCommitteeTopics
-      node.network.subscribe(getSyncCommitteeTopic(node.dag.forkDigests.altair, subnet_id), basicParams)
-      syncnets.setBit(it)
+      node.network.subscribe(getSyncCommitteeTopic(node.dag.forkDigests.altair, idx), basicParams)
+      syncnets.setBit(idx.asInt)
 
   node.network.subscribe(getSyncCommitteeContributionAndProofTopic(node.dag.forkDigests.altair), basicParams)
   node.network.updateSyncnetsMetadata(syncnets)
@@ -823,11 +823,11 @@ proc removeAltairMessageHandlers(node: BeaconNode)
                                 {.raises: [Defect, CatchableError].} =
   node.removePhase0MessageHandlers(node.dag.forkDigests.altair)
 
-  for it in 0'u64 ..< SYNC_COMMITTEE_SUBNET_COUNT.uint64:
+  for committeeIdx in allSyncCommittees():
     closureScope:
-      let subnet_id = SubnetId(it)
+      let idx = committeeIdx
       # TODO This should be done in dynamic way in trackSyncCommitteeTopics
-      node.network.unsubscribe(getSyncCommitteeTopic(node.dag.forkDigests.altair, subnet_id))
+      node.network.unsubscribe(getSyncCommitteeTopic(node.dag.forkDigests.altair, idx))
 
   node.network.unsubscribe(getSyncCommitteeContributionAndProofTopic(node.dag.forkDigests.altair))
 
@@ -1297,14 +1297,14 @@ proc installMessageValidators(node: BeaconNode) =
     proc (signedVoluntaryExit: SignedVoluntaryExit): ValidationResult =
       node.processor[].voluntaryExitValidator(signedVoluntaryExit))
 
-  for it in 0'u64 ..< SYNC_COMMITTEE_SUBNET_COUNT.uint64:
+  for committeeIdx in allSyncCommittees():
     closureScope:
-      let subnet_id = SubnetId(it)
+      let idx = committeeIdx
       node.network.addValidator(
-        getSyncCommitteeTopic(node.dag.forkDigests.altair, subnet_id),
+        getSyncCommitteeTopic(node.dag.forkDigests.altair, idx),
         # This proc needs to be within closureScope; don't lift out of loop.
         proc(msg: SyncCommitteeMessage): ValidationResult =
-          node.processor.syncCommitteeMsgValidator(msg, subnet_id))
+          node.processor.syncCommitteeMsgValidator(msg, idx))
 
   node.network.addValidator(
     getSyncCommitteeContributionAndProofTopic(node.dag.forkDigests.altair),

@@ -36,7 +36,7 @@ type
 
   ImmutableValidatorsMemoryStore* = object
     byIndex*: seq[ImmutableValidatorData2]
-    byPubKey: Table[ValidCompressedPubKeyBytes, ValidatorIndex]
+    byPubKey: Table[ValidatorPubKey, ValidatorIndex]
 
   BeaconChainDBV0* = ref object
     ## BeaconChainDBV0 based on old kvstore table that sets the WITHOUT ROWID
@@ -159,7 +159,9 @@ const
 
 proc add*(store: var ImmutableValidatorsMemoryStore, data: ImmutableValidatorData2) =
   store.byIndex.add data
-  store.byPubKey[data.pubkey.loadValid.toPubKey.blob] = store.byIndex.len - 1
+  store.byPubKey[data.pubkey.loadValid.toPubKey] =
+    IHaveVerifiedThis(ValidatorIndex, store.byIndex.len - 1,
+                      "This is an obviously valid index")
 
 template `[]`*(store: ImmutableValidatorsMemoryStore, idx: int): ImmutableValidatorData2 =
   store.byIndex[idx]
@@ -168,22 +170,22 @@ template `[]`*(store: ImmutableValidatorsMemoryStore, idx: int): ImmutableValida
 proc `[]`*(store: var ImmutableValidatorsMemoryStore,
            key: ValidatorPubKey): var ImmutableValidatorData2
           {.raises: [KeyError, Defect].} =
-  store.byIndex[store.byPubKey[key.blob]]
+  store.byIndex[store.byPubKey[key]]
 
 proc `[]`*(store: var ImmutableValidatorsMemoryStore,
            key: CookedPubKey): var ImmutableValidatorData2
           {.raises: [KeyError, Defect].} =
-  store.byIndex[store.byPubKey[key.toPubkey.blob]]
+  store.byIndex[store.byPubKey[key.toPubkey]]
 
 proc validatorIdx*(store: ImmutableValidatorsMemoryStore,
                    key: ValidatorPubKey): ValidatorIndex
                   {.raises: [KeyError, Defect].} =
-  store.byPubKey[key.blob]
+  store.byPubKey[key]
 
 proc validatorIdx*(store: ImmutableValidatorsMemoryStore,
                    key: CookedPubKey): ValidatorIndex
                   {.raises: [KeyError, Defect].} =
-  store.byPubKey[key.toPubkey.blob]
+  store.byPubKey[key.toPubkey]
 
 template len*(store: ImmutableValidatorsMemoryStore): int =
   store.byIndex.len
@@ -630,8 +632,8 @@ template validateValidatorIndexOr*(idxParam: uint64, dbParam: BeaconChainDB,
                                    failureCase: untyped): ValidatorIndex =
   let idx = idxParam
   let db = dbParam
-  if idx <= uint64(int.max) and int(idx) < db.immutableValidators.len
-    ValidatorIndex(idx)
+  if idx < db.immutableValidators.lenu64:
+    IHaveVerifiedThis(ValidatorIndex, idx, "Just verified")
   else:
     failureCase
 
