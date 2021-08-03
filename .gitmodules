@@ -214,3 +214,12 @@
 	url = https://github.com/status-im/nim-ssz-serialization.git
 	ignore = untracked
 	branch = master
+[submodule "vendor/DOtherSide"]
+	path = vendor/DOtherSide
+	url = https://github.com/filcuc/DOtherSide.git
+	branch = master
+[submodule "vendor/nimqml"]
+	path = vendor/nimqml
+	url = https://github.com/filcuc/nimqml.git
+	branch = master
+

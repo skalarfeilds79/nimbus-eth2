@@ -331,9 +331,6 @@ template signature*(x: ForkedTrustedSignedBeaconBlock): TrustedSig =
 template root*(x: ForkedSignedBeaconBlock | ForkedTrustedSignedBeaconBlock): Eth2Digest =
   withBlck(x): blck.root
 
-template slot*(x: ForkedSignedBeaconBlock | ForkedTrustedSignedBeaconBlock): Slot =
-  withBlck(x): blck.message.slot
-
 template shortLog*(x: ForkedBeaconBlock): auto =
   withBlck(x): shortLog(blck)
 
