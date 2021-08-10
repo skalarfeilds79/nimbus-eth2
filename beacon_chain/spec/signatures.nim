@@ -142,6 +142,38 @@ func compute_attestation_root*(
       fork, DOMAIN_BEACON_ATTESTER, epoch, genesis_validators_root)
   result = compute_signing_root(attestation_data, domain)
 
+# https://github.com/ethereum/eth2.0-specs/blob/v1.1.0-alpha.7/specs/altair/validator.md#prepare-sync-committee-message
+func sync_committee_msg_signing_root*(
+    fork: Fork, epoch: Epoch,
+    genesis_validators_root: Eth2Digest,
+    block_root: Eth2Digest): Eth2Digest =
+  let domain = get_domain(fork, DOMAIN_SYNC_COMMITTEE, epoch, genesis_validators_root)
+  compute_signing_root(block_root, domain)
+
+# https://github.com/ethereum/eth2.0-specs/blob/v1.1.0-alpha.7/specs/altair/validator.md#signature
+func contribution_and_proof_signing_root*(
+    fork: Fork,
+    genesis_validators_root: Eth2Digest,
+    msg: ContributionAndProof): Eth2Digest =
+  let domain = get_domain(fork, DOMAIN_CONTRIBUTION_AND_PROOF,
+                          msg.contribution.slot.epoch,
+                          genesis_validators_root)
+  compute_signing_root(msg, domain)
+
+# https://github.com/ethereum/eth2.0-specs/blob/v1.1.0-alpha.7/specs/altair/validator.md#aggregation-selection
+proc sync_committee_selection_proof_signing_root*(
+    fork: Fork,
+    genesis_validators_root: Eth2Digest,
+    slot: Slot,
+    subcommittee_index: uint64): Eth2Digest =
+  let
+    domain = get_domain(fork, DOMAIN_SYNC_COMMITTEE_SELECTION_PROOF,
+                        slot.epoch, genesis_validators_root)
+    signing_data = SyncAggregatorSelectionData(
+      slot: slot,
+      subcommittee_index: subcommittee_index)
+  compute_signing_root(signing_data, domain)
+
 # https://github.com/ethereum/eth2.0-specs/blob/v1.0.1/specs/phase0/validator.md#aggregate-signature
 func get_attestation_signature*(
     fork: Fork, genesis_validators_root: Eth2Digest,

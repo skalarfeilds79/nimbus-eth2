@@ -159,9 +159,8 @@ proc signSyncCommitteeMessage*(v: AttachedValidator,
                                genesis_validators_root: Eth2Digest,
                                block_root: Eth2Digest): Future[SyncCommitteeMessage] {.async.} =
   let
-    epoch = slot.epoch
-    domain = get_domain(fork, DOMAIN_SYNC_COMMITTEE, epoch, genesis_validators_root)
-    signing_root = compute_signing_root(block_root, domain)
+    signing_root = sync_committee_msg_signing_root(
+      fork, slot.epoch, genesis_validators_root, block_root)
 
   let signature = if v.kind == inProcess:
     blsSign(v.privkey, signing_root.data).toValidatorSig
@@ -182,12 +181,8 @@ proc getSyncCommitteeSelectionProof*(
     slot: Slot,
     subcommittee_index: uint64): Future[ValidatorSig] {.async.} =
   let
-    domain = get_domain(fork, DOMAIN_SYNC_COMMITTEE_SELECTION_PROOF,
-                        slot.epoch, genesis_validators_root)
-    signing_data = SyncAggregatorSelectionData(
-      slot: slot,
-      subcommittee_index: subcommittee_index)
-    signing_root = compute_signing_root(signing_data, domain)
+    signing_root = sync_committee_selection_proof_signing_root(
+      fork, genesis_validators_root, slot, subcommittee_index)
 
   return if v.kind == inProcess:
     blsSign(v.privkey, signing_root.data).toValidatorSig
@@ -201,10 +196,8 @@ proc sign*(
     fork: Fork,
     genesis_validators_root: Eth2Digest) {.async.} =
   let
-    domain = get_domain(fork, DOMAIN_CONTRIBUTION_AND_PROOF,
-                        msg.message.contribution.slot.epoch,
-                        genesis_validators_root)
-    signing_root = compute_signing_root(msg.message, domain)
+    signing_root = contribution_and_proof_signing_root(
+      fork, genesis_validators_root, msg.message)
 
   msg.signature = if v.kind == inProcess:
     blsSign(v.privkey, signing_root.data).toValidatorSig
