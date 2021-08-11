@@ -176,7 +176,7 @@ cli do(slots = SLOTS_PER_EPOCH * 6,
           msg,
           committeeIdx,
           messagesTime,
-          true)
+          false)
 
         doAssert res.isOk
 
@@ -218,7 +218,7 @@ cli do(slots = SLOTS_PER_EPOCH * 6,
             syncCommitteePool,
             signedContributionAndProof,
             contributionsTime,
-            true)
+            false)
 
         doAssert res.isOk
 

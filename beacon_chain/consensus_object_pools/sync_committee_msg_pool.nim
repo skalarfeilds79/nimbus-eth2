@@ -123,6 +123,7 @@ proc produceSyncAggregateAux(votes: BestSyncSubcommitteeContributions): SyncAggr
   var
     aggregateSig {.noInit.}: AggregateSignature
     initialized = false
+    startTime = Moment.now
 
   for subnetId in 0 ..< SYNC_COMMITTEE_SUBNET_COUNT:
     if votes[subnetId].totalParticipants == 0:
@@ -144,10 +145,14 @@ proc produceSyncAggregateAux(votes: BestSyncSubcommitteeContributions): SyncAggr
   else:
     result.sync_committee_signature = ValidatorSig.infinity
 
+  let duration = Moment.now - startTime
+  debug "SyncAggregate produced", duration,
+         bits = result.sync_committee_bits
+
 proc produceSyncAggregate*(
     pool: SyncCommitteeMsgPool,
     target: BlockRef): SyncAggregate =
-  result = if target.root in pool.bestAggregates:
+  if target.root in pool.bestAggregates:
     try:
       produceSyncAggregateAux(pool.bestAggregates[target.root])
     except KeyError:
@@ -155,5 +160,3 @@ proc produceSyncAggregate*(
   else:
     SyncAggregate(sync_committee_signature: ValidatorSig.infinity)
 
-  debug "SyncAggregate produced",
-         target = target.root, value = shortLog(result)
