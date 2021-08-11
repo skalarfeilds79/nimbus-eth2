@@ -755,8 +755,7 @@ proc handleSyncCommitteeContributions(node: BeaconNode,
         debug "Failure to produce contribution",
               slot, head, subnet = candidateAggregators[i].committeeIdx
 
-  debug "Sent contributions",
-        count = contributionsSent, time
+  notice "Contributions sent", count = contributionsSent, time
 
 proc handleProposal(node: BeaconNode, head: BlockRef, slot: Slot):
     Future[BlockRef] {.async.} =

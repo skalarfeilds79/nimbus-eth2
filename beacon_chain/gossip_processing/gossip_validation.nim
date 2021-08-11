@@ -934,7 +934,7 @@ proc validateSignedContributionAndProof*(
         msg.message.contribution.slot + 1,
         committeeIdx,
         msg.message.contribution.aggregation_bits):
-      let validatorPubKey = validatorPubKey.load.get
+      let validatorPubKey = validatorPubKey.loadWithCache.get
       if not initialized:
         initialized = true
         committeeAggKey.init(validatorPubKey)
