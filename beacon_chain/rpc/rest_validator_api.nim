@@ -33,13 +33,19 @@ proc installValidatorApiHandlers*(router: var RestRouter, node: BeaconNode) =
           return RestApiResponse.jsonError(Http400,
                                            InvalidValidatorIndexValueError,
                                            $dres.error())
-        var res: seq[ValidatorIndex]
+        var res: seq[RestValidatorIndex]
         let items = dres.get()
         for item in items:
-          let idx = uint64(item).validateValidatorIndexOr(node.dag):
-            return RestApiResponse.jsonError(Http400,
-                                             TooHighValidatorIndexValueError)
-          res.add(idx)
+          let vres = item.toValidatorIndex()
+          if vres.isErr():
+            case vres.error()
+            of ValidatorIndexError.TooHighValue:
+              return RestApiResponse.jsonError(Http400,
+                                               TooHighValidatorIndexValueError)
+            of ValidatorIndexError.UnsupportedValue:
+              return RestApiResponse.jsonError(Http500,
+                                            UnsupportedValidatorIndexValueError)
+          res.add(vres.get())
         if len(res) == 0:
           return RestApiResponse.jsonError(Http400,
                                            EmptyValidatorIndexArrayError)
@@ -76,7 +82,7 @@ proc installValidatorApiHandlers*(router: var RestRouter, node: BeaconNode) =
               epochRef, slot, CommitteeIndex(committee_index)
             )
             for index_in_committee, validator_index in commitee:
-              if validator_index in indexList:
+              if RestValidatorIndex(validator_index) in indexList:
                 let validator_key = epochRef.validatorKey(validator_index)
                 res.add(
                   RestAttesterDuty(
