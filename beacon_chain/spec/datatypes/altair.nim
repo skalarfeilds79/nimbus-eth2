@@ -28,8 +28,8 @@
 #  stew/byteutils,
 
 import
+  std/[macros, typetraits],
   chronicles,
-  std/macros,
   stew/[assign2, bitops2],
   json_serialization/types as jsonTypes
 
@@ -441,6 +441,25 @@ when false:
   proc `==`*(x, y: ParticipationFlags) : bool {.borrow, noSideEffect.}
 
 chronicles.formatIt BeaconBlock: it.shortLog
+chronicles.formatIt SyncCommitteeIndex: uint8(it)
+
+template asInt*(x: SyncCommitteeIndex): int = int(x)
+template asUInt8*(x: SyncCommitteeIndex): uint8 = uint8(x)
+template asUInt64*(x: SyncCommitteeIndex): uint64 = uint64(x)
+
+template `==`*(x, y: SyncCommitteeIndex): bool =
+  distinctBase(x) == distinctBase(y)
+
+iterator allSyncCommittees*: SyncCommitteeIndex =
+  for committeeIdx in 0 ..< SYNC_COMMITTEE_SUBNET_COUNT:
+    yield SyncCommitteeIndex(committeeIdx)
+
+template validateSyncCommitteeIndexOr*(networkValParam: uint64, elseBody: untyped) =
+  let networkVal = networkValParam
+  if networkVal < SYNC_COMMITTEE_SUBNET_COUNT:
+    SyncCommitteeIndex(networkVal)
+  else:
+    elseBody
 
 template asUInt8*(x: SyncCommitteeIndex): uint8 = uint8(x)
 
@@ -472,12 +491,21 @@ func shortLog*(v: SomeBeaconBlock): auto =
     attestations_len: v.body.attestations.len(),
     deposits_len: v.body.deposits.len(),
     voluntary_exits_len: v.body.voluntary_exits.len(),
+    sync_committee_participants: countOnes(v.body.sync_aggregate.sync_committee_bits)
   )
 
 func shortLog*(v: SomeSignedBeaconBlock): auto =
   (
     blck: shortLog(v.message),
     signature: shortLog(v.signature)
+  )
+
+func shortLog*(v: SyncCommitteeContribution): auto =
+  (
+    slot: shortLog(v.slot),
+    blk: shortLog(v.beacon_block_root),
+    subnetId: v.subcommittee_index,
+    aggregation_bits: $v.aggregation_bits
   )
 
 func shortLog*(v: SyncCommitteeMessage): auto =
@@ -487,5 +515,8 @@ func shortLog*(v: SyncCommitteeMessage): auto =
     validator_index: v.validator_index,
     signature: shortLog(v.signature)
   )
+
+func shortLog*(v: SyncAggregate): auto =
+  $(v.sync_committee_bits)
 
 chronicles.formatIt SyncCommitteeMessage: shortLog(it)

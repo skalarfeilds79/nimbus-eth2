@@ -4,7 +4,7 @@ import
   unittest2,
   ./testutil,
   ../beacon_chain/spec/network,
-  ../beacon_chain/spec/datatypes/[base, altair],
+  ../beacon_chain/spec/datatypes/[phase0, altair],
   ../beacon_chain/validators/attestation_aggregation
 
 suite "Honest validator":

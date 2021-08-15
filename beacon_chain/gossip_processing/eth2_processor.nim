@@ -66,6 +66,7 @@ type
     dag*: ChainDAGRef
     attestationPool*: ref AttestationPool
     validatorPool: ref ValidatorPool
+    syncCommitteeMsgPool: SyncCommitteeMsgPoolRef
 
     doppelgangerDetection*: DoppelgangerProtection
 
@@ -98,6 +99,7 @@ proc new*(T: type Eth2Processor,
           attestationPool: ref AttestationPool,
           exitPool: ref ExitPool,
           validatorPool: ref ValidatorPool,
+          syncCommitteeMsgPool: SyncCommitteeMsgPoolRef,
           quarantine: QuarantineRef,
           rng: ref BrHmacDrbgContext,
           getTime: GetTimeFn): ref Eth2Processor =
@@ -110,6 +112,7 @@ proc new*(T: type Eth2Processor,
     attestationPool: attestationPool,
     exitPool: exitPool,
     validatorPool: validatorPool,
+    syncCommitteeMsgPool: syncCommitteeMsgPool,
     quarantine: quarantine,
     getTime: getTime,
     batchCrypto: BatchCrypto.new(
@@ -194,7 +197,7 @@ proc checkForPotentialDoppelganger(
     let epochRef = self.dag.getEpochRef(
       tgtBlck, attestation.data.target.epoch)
     for validatorIndex in attesterIndices:
-      let validatorPubkey = epochRef.validatorKey(validatorIndex).get().toPubKey()
+      let validatorPubkey = self.dag.validatorKey(validatorIndex).toPubKey()
       if  self.doppelgangerDetectionEnabled and
           self.validatorPool[].getValidator(validatorPubkey) !=
             default(AttachedValidator):
@@ -343,5 +346,60 @@ proc voluntaryExitValidator*(
     return v.error[0]
 
   beacon_voluntary_exits_received.inc()
+
+  ValidationResult.Accept
+
+proc syncCommitteeMsgValidator*(
+    self: ref Eth2Processor,
+    syncCommitteeMsg: SyncCommitteeMessage,
+    committeeIdx: SyncCommitteeIndex,
+    checkSignature: bool = true): ValidationResult =
+  logScope:
+    syncCommitteeMsg = shortLog(syncCommitteeMsg)
+    committeeIdx
+
+  let wallTime = self.getCurrentBeaconTime()
+
+  # Potential under/overflows are fine; would just create odd metrics and logs
+  let delay = wallTime - syncCommitteeMsg.slot.toBeaconTime
+  debug "Sync committee message received", delay
+
+  # Now proceed to validation
+  let v = validateSyncCommitteeMessage(self.dag, self.syncCommitteeMsgPool,
+                                       syncCommitteeMsg, committeeIdx, wallTime,
+                                       checkSignature)
+  if v.isErr():
+    debug "Dropping sync committee message", validationError = v.error
+    return v.error[0]
+
+  trace "Sync committee message validated"
+  ValidationResult.Accept
+
+proc syncCommitteeContributionValidator*(
+    self: ref Eth2Processor,
+    contributionAndProof: SignedContributionAndProof,
+    checkSignature: bool = true): ValidationResult =
+  logScope:
+    contributionAndProof = shortLog(contributionAndProof.message.contribution)
+    signature = shortLog(contributionAndProof.signature)
+    aggregator_index = contributionAndProof.message.aggregator_index
+
+  let wallTime = self.getCurrentBeaconTime()
+
+  # Potential under/overflows are fine; would just create odd metrics and logs
+  let delay = wallTime - contributionAndProof.message.contribution.slot.toBeaconTime
+  debug "Contribution received", delay
+
+  # Now proceed to validation
+  let v = validateSignedContributionAndProof(self.dag, self.syncCommitteeMsgPool,
+                                             contributionAndProof, wallTime,
+                                             checkSignature)
+  if v.isErr():
+    var (afterGenesis, wallSlot) = wallTime.toSlot()
+    debug "Dropping contribution",
+          validationError = v.error,
+          selection_proof = contributionAndProof.message.selection_proof,
+          wallSlot
+    return v.error[0]
 
   ValidationResult.Accept

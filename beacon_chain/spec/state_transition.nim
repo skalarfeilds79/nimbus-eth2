@@ -408,6 +408,7 @@ proc makeBeaconBlock*(
     proposerSlashings: seq[ProposerSlashing],
     attesterSlashings: seq[AttesterSlashing],
     voluntaryExits: seq[SignedVoluntaryExit],
+    sync_aggregate: SyncAggregate,
     executionPayload: ExecutionPayload,
     rollback: RollbackAltairHashedProc,
     cache: var StateCache): Option[altair.BeaconBlock] =
@@ -434,10 +435,7 @@ proc makeBeaconBlock*(
       deposits: List[Deposit, Limit MAX_DEPOSITS](deposits),
       voluntary_exits:
         List[SignedVoluntaryExit, Limit MAX_VOLUNTARY_EXITS](voluntaryExits),
-      sync_aggregate: SyncAggregate(sync_committee_signature:
-        default(CookedSig).toValidatorSig)))
-
-  # TODO sync committees
+      sync_aggregate: sync_aggregate))
 
   let res = process_block(cfg, state.data, blck, {skipBlsValidation}, cache)
 

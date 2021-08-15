@@ -49,7 +49,7 @@ export
 # Eventually, we could also differentiate between user/tainted data and
 # internal state that's gone through sanity checks already.
 
-const SPEC_VERSION* = "1.0.1"
+const SPEC_VERSION* = "1.1.0"
 ## Spec version we're aiming to be compatible with, right now
 
 const
@@ -696,6 +696,12 @@ template `==`*(x: uint64, y: ValidatorIndex): bool =
 template `==`*(x: ValidatorIndex, y: uint64): bool =
   uint64(x) == y
 
+template asUInt64*(x: ValidatorIndex): uint64 =
+  uint64 distinctBase(x)
+
+template verifiedValue*(T: type ValidatorIndex, x: untyped): ValidatorIndex =
+  ValidatorIndex(x)
+
 # TODO Nim 1.4, but not Nim 1.2, defines a function by this name, which works
 # only on openArray[int]. They do the same thing, so either's fine, when both
 # overloads match. The Nim 1.4 stdlib doesn't int-convert but it's a no-op in
@@ -716,6 +722,9 @@ template hash*(x: CommitteeIndex): Hash =
 
 template `$`*(x: CommitteeIndex): auto =
   $ distinctBase(x)
+
+template verifiedValue*(T: type CommitteeIndex, x: untyped): CommitteeIndex =
+  CommitteeIndex(x)
 
 template `==`*(x, y: SubnetId): bool =
   distinctBase(x) == distinctBase(y)

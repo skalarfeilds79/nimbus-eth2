@@ -39,7 +39,7 @@ import
   ./ssz/merkleization,
   ./consensus_object_pools/[
     blockchain_dag, block_quarantine, block_clearance, block_pools_types,
-    attestation_pool, exit_pool, spec_cache],
+    attestation_pool, sync_committee_msg_pool, exit_pool, spec_cache],
   ./eth1/eth1_monitor
 
 from eth/common/eth_types import BlockHashOrNumber
@@ -310,6 +310,7 @@ proc init*(T: type BeaconNode,
       dag.beaconClock.now.slotOrZero.epoch,
       getStateField(dag.headState.data, genesis_validators_root))
     attestationPool = newClone(AttestationPool.init(dag, quarantine))
+    syncCommitteeMsgPool = newClone(SyncCommitteeMsgPool.init())
     exitPool = newClone(ExitPool.init(dag, quarantine))
 
   case config.slashingDbKind
@@ -340,7 +341,7 @@ proc init*(T: type BeaconNode,
     processor = Eth2Processor.new(
       config.doppelgangerDetection,
       blockProcessor, dag, attestationPool, exitPool, validatorPool,
-      quarantine, rng, getTime)
+      syncCommitteeMsgPool, quarantine, rng, getTime)
 
   var node = BeaconNode(
     nickname: nickname,
@@ -354,6 +355,7 @@ proc init*(T: type BeaconNode,
     gossipState: GossipState.Disconnected,
     quarantine: quarantine,
     attestationPool: attestationPool,
+    syncCommitteeMsgPool: syncCommitteeMsgPool,
     attachedValidators: validatorPool,
     exitPool: exitPool,
     eth1Monitor: eth1Monitor,
@@ -431,12 +433,11 @@ proc getAttachedValidators(node: BeaconNode):
     Table[ValidatorIndex, AttachedValidator] =
   for validatorIndex in 0 ..<
       getStateField(node.dag.headState.data, validators).len:
-    let attachedValidator = node.getAttachedValidator(
-      getStateField(node.dag.headState.data, validators),
-      validatorIndex.ValidatorIndex)
-    if attachedValidator.isNil:
-      continue
-    result[validatorIndex.ValidatorIndex] = attachedValidator
+    let
+      validatorIndex = ValidatorIndex.verifiedValue(validatorIndex)
+      attachedValidator = node.getAttachedValidator(validatorIndex)
+    if not attachedValidator.isNil:
+      result[validatorIndex] = attachedValidator
 
 proc updateSubscriptionSchedule(node: BeaconNode, epoch: Epoch) {.async.} =
   doAssert epoch >= 1
@@ -792,9 +793,30 @@ proc addAltairMessageHandlers(node: BeaconNode, slot: Slot)
                              {.raises: [Defect, CatchableError].} =
   node.addPhase0MessageHandlers(node.dag.forkDigests.altair)
 
+  var syncnets: BitArray[SYNC_COMMITTEE_SUBNET_COUNT]
+
+  # TODO: What are the best topic params for this?
+  for committeeIdx in allSyncCommittees():
+    closureScope:
+      let idx = committeeIdx
+      # TODO This should be done in dynamic way in trackSyncCommitteeTopics
+      node.network.subscribe(getSyncCommitteeTopic(node.dag.forkDigests.altair, idx), basicParams)
+      syncnets.setBit(idx.asInt)
+
+  node.network.subscribe(getSyncCommitteeContributionAndProofTopic(node.dag.forkDigests.altair), basicParams)
+  node.network.updateSyncnetsMetadata(syncnets)
+
 proc removeAltairMessageHandlers(node: BeaconNode)
                                 {.raises: [Defect, CatchableError].} =
   node.removePhase0MessageHandlers(node.dag.forkDigests.altair)
+
+  for committeeIdx in allSyncCommittees():
+    closureScope:
+      let idx = committeeIdx
+      # TODO This should be done in dynamic way in trackSyncCommitteeTopics
+      node.network.unsubscribe(getSyncCommitteeTopic(node.dag.forkDigests.altair, idx))
+
+  node.network.unsubscribe(getSyncCommitteeContributionAndProofTopic(node.dag.forkDigests.altair))
 
 func getTopicSubscriptionEnabled(node: BeaconNode): bool =
   node.attestationSubnets.enabled
@@ -819,6 +841,12 @@ proc setupDoppelgangerDetection(node: BeaconNode, slot: Slot) =
     epoch = slot.epoch,
     broadcastStartEpoch =
       node.processor.doppelgangerDetection.broadcastStartEpoch
+
+proc trackSyncCommitteeTopics*(
+    node: BeaconNode) {.
+    raises: [Defect, CatchableError].} =
+  # TODO
+  discard
 
 proc updateGossipStatus(node: BeaconNode, slot: Slot) {.raises: [Defect, CatchableError].} =
   # Syncing tends to be ~1 block/s, and allow for an epoch of time for libp2p
@@ -984,6 +1012,8 @@ proc onSlotEnd(node: BeaconNode, slot: Slot) {.async.} =
   # the database are synced with the filesystem.
   node.db.checkpoint()
 
+  node.syncCommitteeMsgPool[].clearPerSlotData()
+
   # -1 is a more useful output than 18446744073709551615 as an indicator of
   # no future attestation/proposal known.
   template displayInt64(x: Slot): int64 =
@@ -1020,6 +1050,11 @@ proc onSlotEnd(node: BeaconNode, slot: Slot) {.async.} =
 
   if nextAttestationSlot != FAR_FUTURE_SLOT:
     next_action_wait.set(nextActionWaitTime.toFloatSeconds)
+
+  let epoch = slot.epoch
+  if epoch >= node.network.forkId.next_fork_epoch:
+    node.network.updateForkId(
+      node.dag.cfg.getENRForkID(epoch, node.dag.genesisValidatorsRoot))
 
   node.updateGossipStatus(slot)
 
@@ -1249,6 +1284,20 @@ proc installMessageValidators(node: BeaconNode) =
     getVoluntaryExitsTopic(node.dag.forkDigests.altair),
     proc (signedVoluntaryExit: SignedVoluntaryExit): ValidationResult =
       node.processor[].voluntaryExitValidator(signedVoluntaryExit))
+
+  for committeeIdx in allSyncCommittees():
+    closureScope:
+      let idx = committeeIdx
+      node.network.addValidator(
+        getSyncCommitteeTopic(node.dag.forkDigests.altair, idx),
+        # This proc needs to be within closureScope; don't lift out of loop.
+        proc(msg: SyncCommitteeMessage): ValidationResult =
+          node.processor.syncCommitteeMsgValidator(msg, idx))
+
+  node.network.addValidator(
+    getSyncCommitteeContributionAndProofTopic(node.dag.forkDigests.altair),
+    proc(msg: SignedContributionAndProof): ValidationResult =
+      node.processor.syncCommitteeContributionValidator(msg))
 
 proc stop*(node: BeaconNode) =
   bnStatus = BeaconNodeStatus.Stopping
