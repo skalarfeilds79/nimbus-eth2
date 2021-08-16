@@ -240,7 +240,7 @@ proc validateAttestation*(
 
   # [REJECT] The committee index is within the expected range -- i.e.
   # data.index < get_committee_count_per_slot(state, data.target.epoch).
-  let committeeIdx = attestation.data.index.validateCommitteeIndexOr(epochRef):
+  let committeeIdx = attestation.data.index.uint64.validateCommitteeIndexOr(epochRef):
     return errReject("validateAttestation: committee index not within expected range")
 
   # [REJECT] The attestation is for the correct subnet -- i.e.
@@ -427,7 +427,7 @@ proc validateAggregate*(
   let
     epochRef = pool.dag.getEpochRef(target, aggregate.data.target.epoch)
 
-  let committeeIdx = aggregate.data.index.validateCommitteeIndexOr(epochRef):
+  let committeeIdx = aggregate.data.index.uint64.validateCommitteeIndexOr(epochRef):
     return errReject("validateAggregate: Invalid committee index")
 
   if not is_aggregator(

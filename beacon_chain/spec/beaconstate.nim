@@ -548,7 +548,7 @@ func check_attestation_inclusion(data: AttestationData,
 
 func check_attestation_index(
     data: AttestationData, committees_per_slot: uint64): Result[void, cstring] =
-  if not (data.index < committees_per_slot):
+  if not (data.index.uint64 < committees_per_slot):
     return err("Data index exceeds committee count")
 
   ok()

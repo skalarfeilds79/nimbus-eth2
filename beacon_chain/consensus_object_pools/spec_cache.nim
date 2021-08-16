@@ -157,7 +157,7 @@ func makeAttestationData*(
   # https://github.com/ethereum/eth2.0-specs/blob/v1.0.1/specs/phase0/validator.md#attestation-data
   AttestationData(
     slot: slot,
-    index: committee_index.uint64,
+    index: committee_index,
     beacon_block_root: bs.blck.root,
     source: epochRef.current_justified_checkpoint,
     target: Checkpoint(

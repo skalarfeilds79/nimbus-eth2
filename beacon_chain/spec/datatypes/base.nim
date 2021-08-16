@@ -224,7 +224,7 @@ type
   AttestationData* = object
     slot*: Slot
 
-    index*: uint64
+    index*: CommitteeIndex
 
     # LMD GHOST vote
     beacon_block_root*: Eth2Digest

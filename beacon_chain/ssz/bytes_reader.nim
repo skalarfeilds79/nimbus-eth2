@@ -60,6 +60,9 @@ template fromSszBytes*(T: type Slot, bytes: openArray[byte]): T =
 template fromSszBytes*(T: type Epoch, bytes: openArray[byte]): T =
   T fromSszBytes(uint64, bytes)
 
+template fromSszBytes*(T: type CommitteeIndex, bytes: openArray[byte]): T =
+  T fromSszBytes(uint64, bytes)
+
 template fromSszBytes*(T: type ParticipationFlags, bytes: openArray[byte]): T =
   T fromSszBytes(uint8, bytes)
 

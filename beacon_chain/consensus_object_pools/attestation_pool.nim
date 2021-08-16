@@ -338,7 +338,7 @@ iterator attestations*(pool: AttestationPool, slot: Option[Slot],
 
   for candidateIndex in candidateIndices:
     for _, entry in pool.candidates[candidateIndex]:
-      if index.isNone() or entry.data.index == index.get().uint64:
+      if index.isNone() or entry.data.index == index.get():
         var singleAttestation = Attestation(
           aggregation_bits: CommitteeValidatorsBits.init(entry.committee_len),
           data: entry.data)
@@ -361,7 +361,7 @@ type
 func getAttestationCacheKey(ad: AttestationData): AttestationCacheKey =
   # The committee is unique per slot and committee index which means we can use
   # it as key for a participation cache - this is checked in `check_attestation`
-  (ad.slot, ad.index)
+  (ad.slot, ad.index.uint64)
 
 func add(
     attCache: var AttestationCache, data: AttestationData,
@@ -631,7 +631,7 @@ proc getAggregatedAttestation*(pool: var AttestationPool,
   var res: Option[Attestation]
   for _, entry in pool.candidates[candidateIdx.get].mpairs():
     doAssert entry.data.slot == slot
-    if index.uint64 != entry.data.index:
+    if index != entry.data.index:
       continue
 
     entry.updateAggregates()
