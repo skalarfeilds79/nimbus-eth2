@@ -191,10 +191,7 @@ proc sendSyncCommitteeMessage*(
 
   return case ok
     of ValidationResult.Accept:
-      # TODO move to eth2_network
-      node.network.broadcast(
-        getSyncCommitteeTopic(node.dag.forkDigests.altair, committeeIdx),
-        msg)
+      node.network.broadcastSyncCommitteeMessage(msg, committeeIdx)
       beacon_sync_committee_messages_sent.inc()
       true
     else:
@@ -211,10 +208,7 @@ proc sendSyncCommitteeContribution*(
 
   return case ok
     of ValidationResult.Accept:
-      # TODO move to eth2_network
-      node.network.broadcast(
-        getSyncCommitteeContributionAndProofTopic(node.dag.forkDigests.altair),
-        msg)
+      node.network.broadcastSignedContributionAndProof(msg)
       beacon_sync_committee_contributions_sent.inc()
       true
     else:
@@ -352,9 +346,8 @@ proc makeBeaconBlockForHeadAndSlot*(node: BeaconNode,
       if optBlock.isNone:
         return none ForkedSignedBeaconBlock
 
-      return some ForkedSignedBeaconBlock(
-        kind: BeaconBlockFork.Phase0,
-        phase0Block: phase0.SignedBeaconBlock(message: optBlock.get))
+      return some ForkedSignedBeaconBlock.init(
+        phase0.SignedBeaconBlock(message: optBlock.get))
     else:
       func restore(v: var altair.HashedBeaconState) =
         # TODO address this ugly workaround - there should probably be a
@@ -385,9 +378,8 @@ proc makeBeaconBlockForHeadAndSlot*(node: BeaconNode,
       if optBlock.isNone:
         return none ForkedSignedBeaconBlock
 
-      return some ForkedSignedBeaconBlock(
-        kind: BeaconBlockFork.Altair,
-        altairBlock: altair.SignedBeaconBlock(message: optBlock.get))
+      return some ForkedSignedBeaconBlock.init(
+        altair.SignedBeaconBlock(message: optBlock.get))
 
 proc proposeSignedBlock*(node: BeaconNode,
                          head: BlockRef,
@@ -426,13 +418,7 @@ proc proposeSignedBlock*(node: BeaconNode,
     if node.config.dumpEnabled:
       dump(node.config.dumpDirOutgoing, blck)
 
-  case newBlock.kind:
-  of BeaconBlockFork.Phase0:
-    node.network.broadcast(
-      getBeaconBlocksTopic(node.dag.forkDigests.phase0), newBlock.phase0Block)
-  of BeaconBlockFork.Altair:
-    node.network.broadcast(
-      getBeaconBlocksTopic(node.dag.forkDigests.altair), newBlock.altairBlock)
+  node.network.broadcastBeaconBlock(newBlock)
 
   beacon_blocks_proposed.inc()
 
@@ -653,9 +639,8 @@ proc signAndSendContribution(node: BeaconNode,
                          node.dag.forkAtEpoch(contribution.slot.epoch),
                          node.dag.genesisValidatorsRoot)
 
-    node.network.broadcast(
-      getSyncCommitteeContributionAndProofTopic(node.dag.forkDigests.altair),
-      msg[])
+    # Failures logged in sendSyncCommitteeContribution
+    discard await node.sendSyncCommitteeContribution(msg[], false)
   except CatchableError as exc:
     # An error could happen here when the signature task fails - we must
     # not leak the exception because this is an asyncSpawn task
@@ -1087,6 +1072,7 @@ proc sendBeaconBlock*(node: BeaconNode, forked: ForkedSignedBeaconBlock
   if head.slot >= forked.slot():
     node.network.broadcastBeaconBlock(forked)
     return SendBlockResult.ok(false)
+
   let res = await node.proposeSignedBlock(head, AttachedValidator(), forked)
   if res == head:
     # `res == head` means failure, in such case we need to broadcast block
