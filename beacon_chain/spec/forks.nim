@@ -119,6 +119,14 @@ func get_beacon_committee*(
   of forkPhase0: get_beacon_committee(state.hbsPhase0.data, slot, index, cache)
   of forkAltair: get_beacon_committee(state.hbsAltair.data, slot, index, cache)
 
+func get_beacon_committee_len*(
+    state: ForkedHashedBeaconState, slot: Slot, index: CommitteeIndex,
+    cache: var StateCache): uint64 =
+  # This one is used by tests
+  case state.beaconStateFork:
+  of forkPhase0: get_beacon_committee_len(state.hbsPhase0.data, slot, index, cache)
+  of forkAltair: get_beacon_committee_len(state.hbsAltair.data, slot, index, cache)
+
 func get_committee_count_per_slot*(state: ForkedHashedBeaconState,
                                    epoch: Epoch,
                                    cache: var StateCache): uint64 =
