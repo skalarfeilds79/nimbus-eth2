@@ -32,7 +32,7 @@ type
   RpcServer* = RpcHttpServer
 
 proc installValidatorApiHandlers*(rpcServer: RpcServer, node: BeaconNode) {.
-    raises: [Exception].} = # TODO fix json-rpc
+    raises: [Defect, CatchableError].} =
   rpcServer.rpc("get_v1_validator_block") do (
       slot: Slot, graffiti: GraffitiBytes, randao_reveal: ValidatorSig) -> phase0.BeaconBlock:
     debug "get_v1_validator_block", slot = slot
@@ -44,7 +44,7 @@ proc installValidatorApiHandlers*(rpcServer: RpcServer, node: BeaconNode) {.
       node, randao_reveal, proposer.get(), graffiti, head, slot)
     if message.isNone():
       raise newException(CatchableError, "could not retrieve block for slot: " & $slot)
-    return message.get().phase0Block.message
+    return message.get().phase0Block
 
   rpcServer.rpc("post_v1_validator_block") do (body: phase0.SignedBeaconBlock) -> bool:
     debug "post_v1_validator_block",

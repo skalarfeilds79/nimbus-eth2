@@ -300,7 +300,7 @@ proc makeBeaconBlockForHeadAndSlot*(node: BeaconNode,
                                     validator_index: ValidatorIndex,
                                     graffiti: GraffitiBytes,
                                     head: BlockRef,
-                                    slot: Slot): Future[Option[ForkedSignedBeaconBlock]] {.async.} =
+                                    slot: Slot): Future[Option[ForkedBeaconBlock]] {.async.} =
   # Advance state to the slot that we're proposing for
 
   let
@@ -314,7 +314,7 @@ proc makeBeaconBlockForHeadAndSlot*(node: BeaconNode,
 
     if eth1Proposal.hasMissingDeposits:
       error "Eth1 deposits not available. Skipping block proposal", slot
-      return none(ForkedSignedBeaconBlock)
+      return none(ForkedBeaconBlock)
 
     let doPhase0 = slot.epoch < node.dag.cfg.ALTAIR_FORK_EPOCH
     if doPhase0:
@@ -344,10 +344,9 @@ proc makeBeaconBlockForHeadAndSlot*(node: BeaconNode,
         cache)
 
       if optBlock.isNone:
-        return none ForkedSignedBeaconBlock
+        return none ForkedBeaconBlock
 
-      return some ForkedSignedBeaconBlock.init(
-        phase0.SignedBeaconBlock(message: optBlock.get))
+      return some ForkedBeaconBlock.init(optBlock.get)
     else:
       func restore(v: var altair.HashedBeaconState) =
         # TODO address this ugly workaround - there should probably be a
@@ -376,10 +375,9 @@ proc makeBeaconBlockForHeadAndSlot*(node: BeaconNode,
         cache)
 
       if optBlock.isNone:
-        return none ForkedSignedBeaconBlock
+        return none ForkedBeaconBlock
 
-      return some ForkedSignedBeaconBlock.init(
-        altair.SignedBeaconBlock(message: optBlock.get))
+      return some ForkedBeaconBlock.init(optBlock.get)
 
 proc proposeSignedBlock*(node: BeaconNode,
                          head: BlockRef,
@@ -450,17 +448,17 @@ proc proposeBlock(node: BeaconNode,
   if not newBlock.isSome():
     return head # already logged elsewhere!
 
-  template blck: untyped = newBlock.get
+  template blck: untyped = newBlock.unsafeGet()
 
   # TODO abstract this, or move it into makeBeaconBlockForHeadAndSlot, and in
   # general this is far too much copy/paste
-  case blck.kind:
+  let forked = case blck.kind:
   of BeaconBlockFork.Phase0:
-    blck.phase0Block.root = hash_tree_root(blck.phase0Block.message)
+    let root = hash_tree_root(blck.phase0Block)
 
     # TODO: recomputed in block proposal
     let signing_root = compute_block_root(
-      fork, genesis_validators_root, slot, blck.phase0Block.root)
+      fork, genesis_validators_root, slot, root)
     let notSlashable = node.attachedValidators
       .slashingProtection
       .registerBlock(validator_index, validator.pubkey, slot, signing_root)
@@ -472,15 +470,18 @@ proc proposeBlock(node: BeaconNode,
         existingProposal = notSlashable.error
       return head
 
-    blck.phase0Block.signature = await validator.signBlockProposal(
-      fork, genesis_validators_root, slot, blck.phase0Block.root)
-
+    let signature = await validator.signBlockProposal(
+      fork, genesis_validators_root, slot, root)
+    ForkedSignedBeaconBlock.init(
+      phase0.SignedBeaconBlock(
+        message: blck.phase0Block, root: root, signature: signature)
+    )
   of BeaconBlockFork.Altair:
-    blck.altairBlock.root = hash_tree_root(blck.altairBlock.message)
+    let root = hash_tree_root(blck.altairBlock)
 
     # TODO: recomputed in block proposal
     let signing_root = compute_block_root(
-      fork, genesis_validators_root, slot, blck.altairBlock.root)
+      fork, genesis_validators_root, slot, root)
     let notSlashable = node.attachedValidators
       .slashingProtection
       .registerBlock(validator_index, validator.pubkey, slot, signing_root)
@@ -492,10 +493,15 @@ proc proposeBlock(node: BeaconNode,
         existingProposal = notSlashable.error
       return head
 
-    blck.altairBlock.signature = await validator.signBlockProposal(
-      fork, genesis_validators_root, slot, blck.altairBlock.root)
+    let signature = await validator.signBlockProposal(
+      fork, genesis_validators_root, slot, root)
 
-  return await node.proposeSignedBlock(head, validator, blck)
+    ForkedSignedBeaconBlock.init(
+      altair.SignedBeaconBlock(
+        message: blck.altairBlock, root: root, signature: signature)
+    )
+
+  return await node.proposeSignedBlock(head, validator, forked)
 
 proc handleAttestations(node: BeaconNode, head: BlockRef, slot: Slot) =
   ## Perform all attestations that the validators attached to this node should

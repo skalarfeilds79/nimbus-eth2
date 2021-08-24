@@ -31,6 +31,13 @@ type
     Phase0
     Altair
 
+  ForkedBeaconBlock* = object
+    case kind*: BeaconBlockFork
+    of BeaconBlockFork.Phase0:
+      phase0Block*: phase0.BeaconBlock
+    of BeaconBlockFork.Altair:
+      altairBlock*: altair.BeaconBlock
+
   ForkedSignedBeaconBlock* = object
     case kind*: BeaconBlockFork
     of BeaconBlockFork.Phase0:
@@ -51,6 +58,11 @@ type
     altairTopicPrefix*: string # Used by isAltairTopic
 
   ForkDigestsRef* = ref ForkDigests
+
+template init*(T: type ForkedBeaconBlock, blck: phase0.BeaconBlock): T =
+  T(kind: BeaconBlockFork.Phase0, phase0Block: blck)
+template init*(T: type ForkedBeaconBlock, blck: altair.BeaconBlock): T =
+  T(kind: BeaconBlockFork.Altair, altairBlock: blck)
 
 template init*(T: type ForkedSignedBeaconBlock, blck: phase0.SignedBeaconBlock): T =
   T(kind: BeaconBlockFork.Phase0, phase0Block: blck)
