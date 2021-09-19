@@ -69,12 +69,6 @@ OK: 3/3 Fail: 0/3 Skip: 0/3
 + parent sanity [Preset: mainnet]                                                            OK
 ```
 OK: 2/2 Fail: 0/2 Skip: 0/2
-## Diverging hardforks
-```diff
-+ Non-tail block in common                                                                   OK
-+ Tail block only in common                                                                  OK
-```
-OK: 2/2 Fail: 0/2 Skip: 0/2
 ## Eth1 monitor
 ```diff
 + Rewrite HTTPS Infura URLs                                                                  OK
@@ -354,4 +348,4 @@ OK: 1/1 Fail: 0/1 Skip: 0/1
 OK: 36/48 Fail: 0/48 Skip: 12/48
 
 ---TOTAL---
-OK: 192/204 Fail: 0/204 Skip: 12/204
+OK: 190/202 Fail: 0/202 Skip: 12/202
