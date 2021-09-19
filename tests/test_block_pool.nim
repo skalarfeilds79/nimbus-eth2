@@ -12,7 +12,7 @@ import
   std/[options, sequtils],
   unittest2,
   stew/assign2,
-  eth/keys, taskpools,
+  eth/keys,
   ../beacon_chain/spec/datatypes/base,
   ../beacon_chain/spec/[beaconstate, forks, helpers, state_transition],
   ../beacon_chain/beacon_node_types,
@@ -120,8 +120,7 @@ suite "Block pool processing" & preset():
     var
       db = makeTestDB(SLOTS_PER_EPOCH)
       dag = init(ChainDAGRef, defaultRuntimeConfig, db, {})
-      taskpool = Taskpool.new()
-      quarantine = QuarantineRef.init(keys.newRng(), taskpool)
+      quarantine = QuarantineRef.init(keys.newRng())
       nilPhase0Callback: OnPhase0BlockAdded
       state = newClone(dag.headState.data)
       cache = StateCache()
@@ -348,9 +347,7 @@ suite "chain DAG finalization tests" & preset():
     var
       db = makeTestDB(SLOTS_PER_EPOCH)
       dag = init(ChainDAGRef, defaultRuntimeConfig, db, {})
-      taskpool = Taskpool.new()
-      quarantine = QuarantineRef.init(keys.newRng(), taskpool)
-      nilPhase0Callback: OnPhase0BlockAdded
+      quarantine = QuarantineRef.init(keys.newRng())
       cache = StateCache()
       rewards = RewardInfo()
 
@@ -542,8 +539,7 @@ suite "Old database versions" & preset():
         makeInitialDeposits(SLOTS_PER_EPOCH.uint64, flags = {skipBlsValidation}),
         {skipBlsValidation})
       genBlock = get_initial_beacon_block(genState[])
-      taskpool = Taskpool.new()
-      quarantine = QuarantineRef.init(keys.newRng(), taskpool)
+      quarantine = QuarantineRef.init(keys.newRng())
 
   test "pre-1.1.0":
     # only kvstore, no immutable validator keys
@@ -581,8 +577,7 @@ suite "Diverging hardforks":
     var
       db = makeTestDB(SLOTS_PER_EPOCH)
       dag = init(ChainDAGRef, phase0RuntimeConfig, db, {})
-      taskpool = Taskpool.new()
-      quarantine = QuarantineRef.init(keys.newRng(), taskpool)
+      quarantine = QuarantineRef.init(keys.newRng())
       nilPhase0Callback: OnPhase0BlockAdded
       state = newClone(dag.headState.data)
       cache = StateCache()

@@ -18,7 +18,7 @@ import
   math, stats, times, strformat,
   tables, options, random, tables, os,
   confutils, chronicles, eth/db/kvstore_sqlite3,
-  chronos/timer, eth/keys, taskpools,
+  chronos/timer, eth/keys,
   ../tests/testblockutil,
   ../beacon_chain/spec/[
     beaconstate, forks, helpers, signatures, state_transition],
@@ -89,8 +89,7 @@ cli do(slots = SLOTS_PER_EPOCH * 6,
     dag = ChainDAGRef.init(cfg, db, {})
     eth1Chain = Eth1Chain.init(cfg, db)
     merkleizer = depositContractSnapshot.createMerkleizer
-    taskpool = Taskpool.new()
-    quarantine = QuarantineRef.init(keys.newRng(), taskpool)
+    quarantine = QuarantineRef.init(keys.newRng())
     attPool = AttestationPool.init(dag, quarantine)
     syncCommitteePool = newClone SyncCommitteeMsgPool.init()
     timers: array[Timers, RunningStat]

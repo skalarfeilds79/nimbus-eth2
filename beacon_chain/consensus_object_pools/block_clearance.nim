@@ -61,13 +61,12 @@ template asTrusted(x: altair.SignedBeaconBlock or altair.SigVerifiedBeaconBlock)
   ## This assumes that their bytes representation is the same.
   isomorphicCast[altair.TrustedSignedBeaconBlock](x)
 
-proc batchVerify(quarantine: QuarantineRef, sigs: openArray[SignatureSet]): bool =
+func batchVerify(quarantine: QuarantineRef, sigs: openArray[SignatureSet]): bool =
   var secureRandomBytes: array[32, byte]
   quarantine.rng[].brHmacDrbgGenerate(secureRandomBytes)
-  try:
-    return quarantine.taskpool.batchVerify(quarantine.sigVerifCache, sigs, secureRandomBytes)
-  except Exception as exc:
-    raise newException(Defect, "Unexpected exception in batchVerify.")
+
+  # TODO: For now only enable serial batch verification
+  return batchVerifySerial(quarantine.sigVerifCache, sigs, secureRandomBytes)
 
 proc addRawBlock*(
       dag: ChainDAGRef, quarantine: QuarantineRef,

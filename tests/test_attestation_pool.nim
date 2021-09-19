@@ -13,7 +13,7 @@ import
   unittest2,
   chronicles, chronos,
   stew/byteutils,
-  eth/keys, taskpools,
+  eth/keys,
   # Internal
   ../beacon_chain/[beacon_node_types],
   ../beacon_chain/gossip_processing/[gossip_validation],
@@ -60,8 +60,7 @@ suite "Attestation pool processing" & preset():
     # Genesis state that results in 6 members per committee
     var
       dag = init(ChainDAGRef, defaultRuntimeConfig, makeTestDB(SLOTS_PER_EPOCH * 6), {})
-      taskpool = Taskpool.new()
-      quarantine = QuarantineRef.init(keys.newRng(), taskpool)
+      quarantine = QuarantineRef.init(keys.newRng())
       pool = newClone(AttestationPool.init(dag, quarantine))
       state = newClone(dag.headState)
       cache = StateCache()

@@ -102,9 +102,7 @@ proc new*(T: type Eth2Processor,
           syncCommitteeMsgPool: SyncCommitteeMsgPoolRef,
           quarantine: QuarantineRef,
           rng: ref BrHmacDrbgContext,
-          getBeaconTime: GetBeaconTimeFn,
-          taskpool: batch_validation.TaskPoolPtr
-         ): ref Eth2Processor =
+          getBeaconTime: GetBeaconTimeFn): ref Eth2Processor =
   (ref Eth2Processor)(
     doppelGangerDetectionEnabled: doppelGangerDetectionEnabled,
     doppelgangerDetection: DoppelgangerProtection(
@@ -121,8 +119,7 @@ proc new*(T: type Eth2Processor,
       rng = rng,
       # Only run eager attestation signature verification if we're not
       # processing blocks in order to give priority to block processing
-      eager = proc(): bool = not blockProcessor[].hasBlocks(),
-      taskpool)
+      eager = proc(): bool = not blockProcessor[].hasBlocks())
   )
 
 # Gossip Management

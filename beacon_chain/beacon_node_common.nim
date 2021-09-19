@@ -12,7 +12,6 @@ import
 
   # Nimble packages
   chronos, json_rpc/servers/httpserver, presto,
-  taskpools,
 
   # Local modules
   ./conf, ./beacon_clock, ./beacon_chain_db,
@@ -32,7 +31,6 @@ export
 
 type
   RpcServer* = RpcHttpServer
-  TaskPoolPtr* = TaskPool
 
   GossipState* = enum
     Disconnected
@@ -67,7 +65,6 @@ type
     attachedValidatorBalanceTotal*: uint64
     gossipState*: GossipState
     beaconClock*: BeaconClock
-    taskpool*: TaskPoolPtr
 
 const
   MaxEmptySlotCount* = uint64(10*60) div SECONDS_PER_SLOT
