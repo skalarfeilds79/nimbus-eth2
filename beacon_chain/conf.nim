@@ -189,6 +189,11 @@ type
         defaultValueDesc: "9000"
         name: "udp-port" }: Port
 
+      numThreads* {.
+        defaultValue: 1
+        desc: "Number of threads used (0 to use all logical threads)"
+        name: "num-threads" }: int
+
       maxPeers* {.
         desc: "The maximum number of peers to connect to"
         defaultValue: 160 # 5 (fanout) * 64 (subnets) / 2 (subs) for a heathy mesh
