@@ -1,34 +1,5 @@
-AllTests-mainnet
+FixtureSSZGeneric-mainnet
 ===
-## 
-```diff
-+ Slashing test: duplicate_pubkey_not_slashable.json                                         OK
-+ Slashing test: multiple_interchanges_single_validator_single_message_gap.json              OK
-+ Slashing test: multiple_interchanges_single_validator_single_message_out_of_order.json     OK
-+ Slashing test: multiple_validators_multiple_blocks_and_attestations.json                   OK
-+ Slashing test: multiple_validators_same_slot_blocks.json                                   OK
-+ Slashing test: single_validator_genesis_attestation.json                                   OK
-+ Slashing test: single_validator_import_only.json                                           OK
-+ Slashing test: single_validator_multiple_block_attempts.json                               OK
-+ Slashing test: single_validator_multiple_blocks_and_attestations.json                      OK
-+ Slashing test: single_validator_out_of_order_attestations.json                             OK
-+ Slashing test: single_validator_out_of_order_blocks.json                                   OK
-+ Slashing test: single_validator_resign_attestation.json                                    OK
-+ Slashing test: single_validator_resign_block.json                                          OK
-+ Slashing test: single_validator_single_attestation.json                                    OK
-+ Slashing test: single_validator_single_block.json                                          OK
-+ Slashing test: single_validator_single_block_and_attestation.json                          OK
-+ Slashing test: single_validator_single_block_and_attestation_signing_root.json             OK
-+ Slashing test: single_validator_slashable_attestations_double_vote.json                    OK
-+ Slashing test: single_validator_slashable_attestations_surrounded_by_existing.json         OK
-+ Slashing test: single_validator_slashable_attestations_surrounds_existing.json             OK
-+ Slashing test: single_validator_slashable_blocks.json                                      OK
-+ Slashing test: single_validator_slashable_blocks_no_root.json                              OK
-+ Slashing test: single_validator_source_greater_than_target.json                            OK
-+ Slashing test: single_validator_two_blocks_no_signing_root.json                            OK
-+ Slashing test: wrong_genesis_validators_root.json                                          OK
-```
-OK: 25/25 Fail: 0/25 Skip: 0/25
 ## Attestation pool processing [Preset: mainnet]
 ```diff
 + Attestations may arrive in any order [Preset: mainnet]                                     OK
@@ -67,13 +38,6 @@ OK: 16/16 Fail: 0/16 Skip: 0/16
 ## Beacon state [Preset: mainnet]
 ```diff
 + Smoke test initialize_beacon_state_from_eth1 [Preset: mainnet]                             OK
-+ get_beacon_proposer_index                                                                  OK
-+ latest_block_root                                                                          OK
-```
-OK: 3/3 Fail: 0/3 Skip: 0/3
-## Block pool altair processing [Preset: mainnet]
-```diff
-+ Invalid signatures [Preset: mainnet]                                                       OK
 ```
 OK: 1/1 Fail: 0/1 Skip: 0/1
 ## Block pool processing [Preset: mainnet]
@@ -170,7 +134,7 @@ OK: 7/7 Fail: 0/7 Skip: 0/7
 ## Gossip validation  [Preset: mainnet]
 ```diff
 + Any committee index is valid                                                               OK
-+ validateAttestation                                                                        OK
++ Validation sanity                                                                          OK
 ```
 OK: 2/2 Fail: 0/2 Skip: 0/2
 ## Gossip validation - Extra
@@ -238,33 +202,6 @@ OK: 1/1 Fail: 0/1 Skip: 0/1
 + deletePeer() test                                                                          OK
 ```
 OK: 12/12 Fail: 0/12 Skip: 0/12
-## Slashing Protection DB - Interchange [Preset: mainnet]
-```diff
-+ Smoke test - Complete format - Invalid database is refused [Preset: mainnet]               OK
-+ Smoke test - Complete format [Preset: mainnet]                                             OK
-```
-OK: 2/2 Fail: 0/2 Skip: 0/2
-## Slashing Protection DB - v1 and v2 migration [Preset: mainnet]
-```diff
-+ Minimal format migration [Preset: mainnet]                                                 OK
-```
-OK: 1/1 Fail: 0/1 Skip: 0/1
-## Slashing Protection DB [Preset: mainnet]
-```diff
-+ Attestation ordering #1698                                                                 OK
-+ Don't prune the very last attestation(s) even by mistake                                   OK
-+ Don't prune the very last block even by mistake                                            OK
-+ Empty database [Preset: mainnet]                                                           OK
-+ Pruning attestations works                                                                 OK
-+ Pruning blocks works                                                                       OK
-+ SP for block proposal - backtracking append                                                OK
-+ SP for block proposal - linear append                                                      OK
-+ SP for same epoch attestation target - linear append                                       OK
-+ SP for surrounded attestations                                                             OK
-+ SP for surrounding attestations                                                            OK
-+ Test valid attestation #1699                                                               OK
-```
-OK: 12/12 Fail: 0/12 Skip: 0/12
 ## Spec datatypes
 ```diff
 + Graffiti bytes                                                                             OK
@@ -319,33 +256,6 @@ OK: 14/14 Fail: 0/14 Skip: 0/14
 + default initialization of signatures                                                       OK
 ```
 OK: 3/3 Fail: 0/3 Skip: 0/3
-## [Unit - Spec - Block processing] Attestations  [Preset: mainnet]
-```diff
-+ Valid attestation                                                                          OK
-+ Valid attestation from previous epoch                                                      OK
-```
-OK: 2/2 Fail: 0/2 Skip: 0/2
-## [Unit - Spec - Block processing] Deposits  [Preset: mainnet]
-```diff
-+ Deposit at MAX_EFFECTIVE_BALANCE balance (32 ETH)                                          OK
-+ Deposit over MAX_EFFECTIVE_BALANCE balance (32 ETH)                                        OK
-+ Deposit under MAX_EFFECTIVE_BALANCE balance (32 ETH)                                       OK
-+ Invalid deposit at MAX_EFFECTIVE_BALANCE balance (32 ETH)                                  OK
-+ Validator top-up                                                                           OK
-```
-OK: 5/5 Fail: 0/5 Skip: 0/5
-## [Unit - Spec - Epoch processing] Justification and Finalization  [Preset: mainnet]
-```diff
-+  Rule I - 234 finalization with enough support                                             OK
-+  Rule I - 234 finalization without support                                                 OK
-+  Rule II - 23 finalization with enough support                                             OK
-+  Rule II - 23 finalization without support                                                 OK
-+  Rule III - 123 finalization with enough support                                           OK
-+  Rule III - 123 finalization without support                                               OK
-+  Rule IV - 12 finalization with enough support                                             OK
-+  Rule IV - 12 finalization without support                                                 OK
-```
-OK: 8/8 Fail: 0/8 Skip: 0/8
 ## chain DAG finalization tests [Preset: mainnet]
 ```diff
 + init with gaps [Preset: mainnet]                                                           OK
@@ -376,4 +286,4 @@ OK: 1/1 Fail: 0/1 Skip: 0/1
 OK: 6/6 Fail: 0/6 Skip: 0/6
 
 ---TOTAL---
-OK: 207/209 Fail: 0/209 Skip: 2/209
+OK: 154/156 Fail: 0/156 Skip: 2/156
