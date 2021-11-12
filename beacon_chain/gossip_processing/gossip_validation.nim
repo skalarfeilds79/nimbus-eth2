@@ -172,9 +172,10 @@ template checkedReject(error: ValidationError): untyped =
   err(error)
 
 # https://github.com/ethereum/eth2.0-specs/blob/v1.0.1/specs/phase0/p2p-interface.md#beacon_block
-proc validateBeaconBlock*(
+proc validateBeaconBlockAux(
     dag: ChainDAGRef, quarantine: QuarantineRef,
-    signed_beacon_block: phase0.SignedBeaconBlock | altair.SignedBeaconBlock,
+    signed_beacon_block: phase0.SignedBeaconBlock | altair.SignedBeaconBlock |
+                         merge.SignedBeaconBlock,
     wallTime: BeaconTime, flags: UpdateFlags): Result[void, ValidationError] =
   # In general, checks are ordered from cheap to expensive. Especially, crypto
   # verification could be quite a bit more expensive than the rest. This is an
@@ -298,6 +299,39 @@ proc validateBeaconBlock*(
     return errReject("Invalid proposer signature")
 
   ok()
+
+proc validateBeaconBlock*(
+       dag: ChainDAGRef, quarantine: QuarantineRef,
+       signed_beacon_block: phase0.SignedBeaconBlock | altair.SignedBeaconBlock,
+       wallTime: BeaconTime, flags: UpdateFlags):
+       Result[void, ValidationError] =
+  dag.validateBeaconBlockAux(quarantine, signed_beacon_block, wallTime, flags)
+
+# https://github.com/ethereum/consensus-specs/blob/v1.1.0/specs/merge/p2p-interface.md#beacon_block
+proc validateBeaconBlock*(
+       dag: ChainDAGRef, quarantine: QuarantineRef,
+       signed_beacon_block: merge.SignedBeaconBlock,
+       wallTime: BeaconTime, flags: UpdateFlags):
+       Result[void, ValidationError] =
+
+  template blck = signed_beacon_block.message
+  template execution_payload = blck.body.execution_payload
+
+  # If the execution is enabled for the block -- i.e.
+  # is_execution_enabled(state, block.body) then validate the following:
+  when false:
+    if is_execution_enabled(state, blck.body):
+      # TODO needs to be a merge.BeaconState specifically
+      let state = dag.head.data
+
+      # [REJECT] The block's execution payload timestamp is correct with respect
+      # to the slot -- i.e. execution_payload.timestamp ==
+      # compute_timestamp_at_slot(state, block.slot).
+      if not (execution_payload.timestamp ==
+          compute_timestamp_at_slot(state, blck.slot)):
+        return errReject("BeaconBlock: mismatched execution payload timestamp")
+
+  dag.validateBeaconBlockAux(quarantine, signed_beacon_block, wallTime, flags)
 
 # https://github.com/ethereum/eth2.0-specs/blob/v1.0.1/specs/phase0/p2p-interface.md#beacon_attestation_subnet_id
 proc validateAttestation*(

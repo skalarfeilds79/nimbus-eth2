@@ -1190,25 +1190,63 @@ proc startEth1Syncing(m: Eth1Monitor, delayBeforeStart: Duration) {.async.} =
     if m.depositsChain.hasConsensusViolation:
       raise newException(CorruptDataProvider, "Eth1 chain contradicts Eth2 consensus")
 
-    awaitWithTimeout(m.eth1Progress.wait(), 5.minutes):
-      raise newException(CorruptDataProvider, "No eth1 chain progress for too long")
+    let nextBlock = if m.mustUsePolling:
+      let blk = awaitWithRetries(
+        m.dataProvider.web3.provider.eth_getBlockByNumber(blockId("latest"), false))
 
-    m.eth1Progress.clear()
+      let fullBlockId = FullBlockId.init(blk)
 
-    if m.latestEth1BlockNumber <= m.cfg.ETH1_FOLLOW_DISTANCE:
-      continue
+      if m.latestEth1Block.isSome and
+         m.latestEth1Block.get == fullBlockId:
+        await sleepAsync(m.cfg.SECONDS_PER_ETH1_BLOCK.int.seconds)
 
-    let targetBlock = m.latestEth1BlockNumber - m.cfg.ETH1_FOLLOW_DISTANCE
-    if targetBlock <= eth1SyncedTo:
-      continue
+      m.latestEth1Block = some fullBlockId
+      blk
+    else:
+      awaitWithTimeout(m.eth1Progress.wait(), 5.minutes):
+        raise newException(CorruptDataProvider, "No eth1 chain progress for too long")
+      m.eth1Progress.clear()
 
-    let earliestBlockOfInterest = m.earliestBlockOfInterest()
-    await m.syncBlockRange(scratchMerkleizer,
-                           eth1SyncedTo + 1,
-                           targetBlock,
-                           earliestBlockOfInterest)
-    eth1SyncedTo = targetBlock
-    eth1_synced_head.set eth1SyncedTo.toGaugeValue
+      awaitWithRetries(
+        m.dataProvider.getBlockByHash(m.latestEth1Block.get.hash))
+
+    notice "FOO2",
+      mCurrentEpoch = m.currentEpoch,
+      mMERGEFORKEPOCH = m.cfg.MERGE_FORK_EPOCH,
+      isNoTermBlock = m.terminalBlockHash.isNone
+    if m.currentEpoch >= m.cfg.MERGE_FORK_EPOCH and m.terminalBlockHash.isNone:
+      # TODO why would latestEth1Block be isNone?
+      var terminalBlockCandidate = nextBlock
+
+      notice "FOO1",
+        tBC_tD = terminalBlockCandidate.totalDifficulty,
+        TTD = m.cfg.TERMINAL_TOTAL_DIFFICULTY,
+        condition = terminalBlockCandidate.totalDifficulty >= m.cfg.TERMINAL_TOTAL_DIFFICULTY
+
+      if terminalBlockCandidate.totalDifficulty >= m.cfg.TERMINAL_TOTAL_DIFFICULTY:
+        while not terminalBlockCandidate.parentHash.isZeroMemory:
+          var parentBlock = awaitWithRetries(
+            m.dataProvider.getBlockByHash(terminalBlockCandidate.parentHash))
+          if parentBlock.totalDifficulty < m.cfg.TERMINAL_TOTAL_DIFFICULTY:
+            break
+          terminalBlockCandidate = parentBlock
+        m.terminalBlockHash = some terminalBlockCandidate.hash
+
+    if shouldProcessDeposits:
+      if m.latestEth1BlockNumber <= m.cfg.ETH1_FOLLOW_DISTANCE:
+        continue
+
+      let targetBlock = m.latestEth1BlockNumber - m.cfg.ETH1_FOLLOW_DISTANCE
+      if targetBlock <= eth1SyncedTo:
+        continue
+
+      let earliestBlockOfInterest = m.earliestBlockOfInterest()
+      await m.syncBlockRange(scratchMerkleizer,
+                             eth1SyncedTo + 1,
+                             targetBlock,
+                             earliestBlockOfInterest)
+      eth1SyncedTo = targetBlock
+      eth1_synced_head.set eth1SyncedTo.toGaugeValue
 
 proc start(m: Eth1Monitor, delayBeforeStart: Duration) =
   if m.runFut.isNil:

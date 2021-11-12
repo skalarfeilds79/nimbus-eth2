@@ -178,7 +178,7 @@ proc storeBlock*(
 # Event Loop
 # ------------------------------------------------------------------------------
 
-proc processBlock(self: var BlockProcessor, entry: BlockEntry) =
+proc processBlock(self: var BlockProcessor, entry: BlockEntry): bool =
   logScope:
     blockRoot = shortLog(entry.blck.root)
 
@@ -214,12 +214,16 @@ proc processBlock(self: var BlockProcessor, entry: BlockEntry) =
       queueDur, storeBlockDur, updateHeadDur
 
     entry.done()
+    true
   elif res.error() in {BlockError.Duplicate, BlockError.Old}:
     # Duplicate and old blocks are ok from a sync point of view, so we mark
     # them as successful
     entry.done()
+    # if this is what matters, that's ... weird/wrong.
+    true
   else:
     entry.fail(res.error())
+    false
 
 proc runQueueProcessingLoop*(self: ref BlockProcessor) {.async.} =
   while true:
@@ -236,4 +240,21 @@ proc runQueueProcessingLoop*(self: ref BlockProcessor) {.async.} =
 
     discard await idleAsync().withTimeout(idleTimeout)
 
-    self[].processBlock(await self[].blocksQueue.popFirst())
+    let blck = await self[].blocksQueue.popFirst()
+    info "FOO11",
+      block_kind = blck.blck.kind,
+      block_matches_merge = blck.blck.kind >= BeaconBlockFork.Merge
+    if blck.blck.kind >= BeaconBlockFork.Merge:
+      info "FOO9",
+        block_hash = blck.blck.mergeData.message.body.execution_payload.block_hash,
+        parent_hash = blck.blck.mergeData.message.body.execution_payload.parent_hash
+    if  self[].processBlock(blck) and blck.blck.kind >= BeaconBlockFork.Merge and
+        # wasn't necessary before, but not incorrect either; helps it run san
+        # execution client for local testnets
+        blck.blck.mergeData.message.body.execution_payload !=
+          default(merge.ExecutionPayload):
+      info "FOO10",
+        block_hash = blck.blck.mergeData.message.body.execution_payload.block_hash,
+        parent_hash = blck.blck.mergeData.message.body.execution_payload.parent_hash
+      await self.consensusManager.dag.executionPayloadSync(
+        self.consensusManager.web3Provider, blck.blck.mergeData.message)

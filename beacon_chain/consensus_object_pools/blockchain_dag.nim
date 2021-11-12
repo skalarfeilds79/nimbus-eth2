@@ -1476,7 +1476,7 @@ proc newExecutionPayload(
     parent_hash = executionPayload.parent_hash,
     block_hash = executionPayload.block_hash
   template getTypedTransaction(t: Transaction): TypedTransaction =
-    TypedTransaction(t.value.distinctBase)
+    TypedTransaction(t.distinctBase)
   let rpcExecutionPayload = (ref engine_api.ExecutionPayloadV1)(
     parentHash: executionPayload.parent_hash.asBlockHash,
     coinbase: Address(executionPayload.coinbase.data),
@@ -1488,7 +1488,7 @@ proc newExecutionPayload(
     gasLimit: Quantity(executionPayload.gas_limit),
     gasUsed: Quantity(executionPayload.gas_used),
     timestamp: Quantity(executionPayload.timestamp),
-    extraData: DynamicBytes[32](executionPayload.extra_data),
+    extraData: DynamicBytes[0, 32](executionPayload.extra_data),
 
     # TODO x86 and the usual ARM ABIs are all little-endian, so this matches
     # the spec coincidentally, but it's unportable
@@ -1553,7 +1553,7 @@ proc executionPayloadSync*(
     if blockData.isNone or blockData.get.data.kind < BeaconBlockFork.Merge:
       break
 
-    let executionPayload = blockData.get.data.mergeBlock.message.body.execution_payload
+    let executionPayload = blockData.get.data.mergeData.message.body.execution_payload
 
     if await web3Provider.newExecutionPayload(executionPayload):
       break
@@ -1585,7 +1585,7 @@ proc executionPayloadSync*(
       break
 
     # ... or consensus-layer chain.
-    root = blockData.get.data.mergeBlock.message.parent_root
+    root = blockData.get.data.mergeData.message.parent_root
     if root == default(Eth2Digest):
       info "FOO7",
         parent_hash = executionPayload.parent_hash,
