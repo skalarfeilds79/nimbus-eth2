@@ -16,9 +16,12 @@ import
   ../consensus_object_pools/[block_clearance, blockchain_dag, attestation_pool],
   ./consensus_manager,
   ".."/[beacon_clock],
-  ../sszdump
+  ../sszdump,
+  ../eth1/eth1_monitor
 
 export sszdump
+
+import web3/engine_api_types
 
 # Block Processor
 # ------------------------------------------------------------------------------
@@ -62,7 +65,7 @@ type
     # Consumer
     # ----------------------------------------------------------------
     consensusManager: ref ConsensusManager
-      ## Blockchain DAG, AttestationPool and Quarantine
+      ## Blockchain DAG, AttestationPool, Quarantine, and Eth1Manager
     getBeaconTime: GetBeaconTimeFn
 
 # Initialization

@@ -34,6 +34,9 @@ import
   ".."/[conf, beacon_clock, beacon_node, version],
   "."/[slashing_protection, validator_pool, keystore_management]
 
+import stint/endians2
+import stint/private/datatypes
+
 # Metrics for tracking attestation and beacon block loss
 const delayBuckets = [-Inf, -4.0, -2.0, -1.0, -0.5, -0.1, -0.05,
                       0.05, 0.1, 0.5, 1.0, 2.0, 4.0, 8.0, Inf]
@@ -380,6 +383,41 @@ proc getBlockProposalEth1Data*(node: BeaconNode,
       state, finalizedEpochRef.eth1_data,
       finalizedEpochRef.eth1_deposit_index)
 
+# https://github.com/ethereum/consensus-specs/blob/v1.1.0/specs/merge/validator.md#executionpayload
+proc get_execution_payload(
+    payload_id: Opt[uint64], execution_engine: Web3DataProviderRef):
+    Future[merge.ExecutionPayload] {.async.} =
+  return if payload_id.isErr():
+    # Pre-merge, empty payload
+    default(merge.ExecutionPayload)
+  else:
+    template getTransaction(t: TypedTransaction): Transaction =
+      Transaction.init(t.distinctBase)
+
+    let rpcExecutionPayload =
+      await execution_engine.get_payload(payload_id.get.Quantity)
+    when false:
+      debug "get_execution_payload: execution_engine.get_payload",
+        rpcExecutionPayload
+    # TODO split these conversions out and enable round-trip testing
+    merge.ExecutionPayload(
+      parent_hash: rpcExecutionPayload.parentHash.asEth2Digest,
+      coinbase: EthAddress(data: rpcExecutionPayload.coinbase.distinctBase),
+      state_root: rpcExecutionPayload.stateRoot.asEth2Digest,
+      receipt_root: rpcExecutionPayload.receiptRoot.asEth2Digest,
+      logs_bloom: BloomLogs(data: rpcExecutionPayload.logsBloom.distinctBase),
+      random: rpcExecutionPayload.random.asEth2Digest,
+      block_number: rpcExecutionPayload.blockNumber.uint64,
+      gas_limit: rpcExecutionPayload.gasLimit.uint64,
+      gas_used: rpcExecutionPayload.gasUsed.uint64,
+      timestamp: rpcExecutionPayload.timestamp.uint64,
+      extra_data: List[byte, 32].init(rpcExecutionPayload.extraData.distinctBase),
+      base_fee_per_gas:
+        Eth2Digest(data: rpcExecutionPayload.baseFeePerGas.toBytesLE),
+      block_hash: rpcExecutionPayload.blockHash.asEth2Digest,
+      transactions: List[merge.Transaction, MAX_TRANSACTIONS_PER_PAYLOAD].init(
+        mapIt(rpcExecutionPayload.transactions, it.getTransaction)))
+
 proc makeBeaconBlockForHeadAndSlot*(node: BeaconNode,
                                     randao_reveal: ValidatorSig,
                                     validator_index: ValidatorIndex,
@@ -408,23 +446,38 @@ proc makeBeaconBlockForHeadAndSlot*(node: BeaconNode,
 
     let exits = withState(stateData.data):
       node.exitPool[].getBeaconBlockExits(state.data)
-    return makeBeaconBlock(
-      node.dag.cfg,
-      stateData.data,
-      validator_index,
-      randao_reveal,
-      eth1Proposal.vote,
-      graffiti,
-      node.attestationPool[].getAttestationsForBlock(stateData.data, cache),
-      eth1Proposal.deposits,
-      exits,
-      if slot.epoch < node.dag.cfg.ALTAIR_FORK_EPOCH:
-        SyncAggregate.init()
-      else:
-        node.sync_committee_msg_pool[].produceSyncAggregate(head.root),
-      default(merge.ExecutionPayload),
-      noRollback, # Temporary state - no need for rollback
-      cache)
+    try:
+      return makeBeaconBlock(
+        node.dag.cfg,
+        stateData.data,
+        validator_index,
+        randao_reveal,
+        eth1Proposal.vote,
+        graffiti,
+        node.attestationPool[].getAttestationsForBlock(stateData.data, cache),
+        eth1Proposal.deposits,
+        exits,
+        if slot.epoch < node.dag.cfg.ALTAIR_FORK_EPOCH:
+          SyncAggregate.init()
+        else:
+          node.sync_committee_msg_pool[].produceSyncAggregate(head.root),
+        default(merge.ExecutionPayload),
+        #when false:
+        #  if slot.epoch < node.dag.cfg.MERGE_FORK_EPOCH:
+        #    default(merge.ExecutionPayload)
+        #  else:
+        #    # Loudly fail for now. Needs a more reasonable fallback.
+        #    doAssert not node.eth1Monitor.isNil
+        #
+        #    let payload_id = 0'u64    # TODO WRONG, probably do forkchoiceUpdate here so not as to carry around payload_id
+        #    let payload = await get_execution_payload(
+        #      ok(payload_id), node.consensusManager.web3Provider)
+        #    payload,
+        noRollback, # Temporary state - no need for rollback
+        cache)
+    except CatchableError as err:
+      # Prefer not to create block at all if it can't get ExecutionPayload
+      error "Error creating beacon block", msg = err.msg
 
 proc proposeSignedBlock*(node: BeaconNode,
                          head: BlockRef,

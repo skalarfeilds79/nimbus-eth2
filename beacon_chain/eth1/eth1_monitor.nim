@@ -20,7 +20,7 @@ import
   ../spec/datatypes/[base, merge],
   ../networking/network_metadata,
   ../consensus_object_pools/block_pools_types,
-  ".."/[beacon_chain_db, beacon_node_status],
+  ".."/[beacon_chain_db, beacon_node_status, beacon_clock],
   ./merkle_minimal
 
 export
@@ -73,13 +73,26 @@ type
 
   DepositsMerkleizer* = SszMerkleizer[depositContractLimit]
 
+  Eth1RecentBlocks* = object
+    blocksByHash: Table[BlockHash, Eth1Block]
+    latestBlockHeader: Option[Eth1BlockHeader]
+
   Eth1Chain* = object
     db: BeaconChainDB
     cfg: RuntimeConfig
-    blocks: Deque[Eth1Block]
-    blocksByHash: Table[BlockHash, Eth1Block]
     finalizedBlockHash: Eth2Digest
     finalizedDepositsMerkleizer: DepositsMerkleizer
+
+      ## The latest block that reached a 50% majority vote from
+      ## the Eth2 validators according to the follow distance and
+      ## the ETH1_VOTING_PERIOD
+
+    blocks: Deque[Eth1Block]
+      ## A non-forkable chain of blocks ending at the block with
+      ## ETH1_FOLLOW_DISTANCE offset from the head.
+
+    blocksByHash: Table[BlockHash, Eth1Block]
+
     hasConsensusViolation: bool
       ## The local chain contradicts the observed consensus on the network
 
@@ -96,15 +109,19 @@ type
     web3Urls: seq[string]
     eth1Network: Option[Eth1Network]
     depositContractAddress*: Eth1Address
+    mustUsePolling: bool
 
     dataProvider: Web3DataProviderRef
+    latestEth1Block: Option[FullBlockId]
 
     depositsChain: Eth1Chain
-    latestEth1BlockNumber: Eth1BlockNumber
     eth1Progress: AsyncEvent
+
+    terminalBlockHash*: Option[BlockHash]
 
     runFut: Future[void]
     stopFut: Future[void]
+    getBeaconTime: GetBeaconTimeFn
 
     when hasGenesisDetection:
       genesisValidators: seq[ImmutableValidatorData]
@@ -119,6 +136,10 @@ type
     blockHeadersSubscription: Subscription
 
   Web3DataProviderRef* = ref Web3DataProvider
+
+  FullBlockId* = object
+    number: Eth1BlockNumber
+    hash: BlockHash
 
   DataProviderFailure* = object of CatchableError
   CorruptDataProvider* = object of DataProviderFailure
@@ -162,6 +183,22 @@ func depositCountU64(s: DepositContractState): uint64 =
     doAssert s.deposit_count[i] == 0
 
   uint64.fromBytesBE s.deposit_count[24..31]
+
+func latestEth1BlockNumber(m: Eth1Monitor): Eth1BlockNumber =
+  if m.latestEth1Block.isSome:
+    Eth1BlockNumber m.latestEth1Block.get.number
+  else:
+    Eth1BlockNumber 0
+
+proc pruneOldBlocks(store: var Eth1RecentBlocks) =
+  if store.latestBlockHeader.isSome:
+    var toDelete: seq[BlockHash]
+    for hash, blk in store.blocksByHash:
+      if blk.number + 20 < store.latestBlockHeader.get.number.uint64:
+        toDelete.add hash
+
+    for hash in toDelete:
+      store.blocksByHash.del(hash)
 
 when hasGenesisDetection:
   import spec/[beaconstate, signatures]
@@ -233,7 +270,7 @@ when hasGenesisDetection:
     m.db.genesisDeposits.add newDeposit
     m.produceDerivedData(newDeposit)
 
-template blocks*(m: Eth1Monitor): Deque[Eth1Block] =
+template depositChainBlocks*(m: Eth1Monitor): Deque[Eth1Block] =
   m.depositsChain.blocks
 
 template cfg(m: Eth1Monitor): auto =
@@ -282,7 +319,7 @@ func is_candidate_block(cfg: RuntimeConfig,
 func asEth2Digest*(x: BlockHash): Eth2Digest =
   Eth2Digest(data: array[32, byte](x))
 
-template asBlockHash(x: Eth2Digest): BlockHash =
+template asBlockHash*(x: Eth2Digest): BlockHash =
   BlockHash(x.data)
 
 func shortLog*(b: Eth1Block): string =
@@ -772,6 +809,11 @@ proc new*(T: type Web3DataProvider,
 
   return ok Web3DataProviderRef(url: web3Url, web3: web3, ns: ns)
 
+# route around eth1 monitor initialization gating; intentionally a bit clunky
+proc newWeb3DataProvider*(depositContractAddress: Eth1Address, web3Url: string):
+    Future[Result[Web3DataProviderRef, string]] =
+  Web3DataProvider.new(depositContractAddress, web3Url)
+
 proc putInitialDepositContractSnapshot*(db: BeaconChainDB,
                                         s: DepositContractSnapshot) =
   let existingStart = db.getEth2FinalizedTo()
@@ -791,26 +833,61 @@ proc init*(T: type Eth1Chain, cfg: RuntimeConfig, db: BeaconChainDB): T =
     finalizedBlockHash: finalizedDeposits.eth1Block,
     finalizedDepositsMerkleizer: finalizedDeposits.createMerkleizer)
 
+proc currentEpoch*(m: Eth1Monitor): Epoch =
+  if m.getBeaconTime != nil:
+    m.getBeaconTime().slotOrZero.epoch
+  else:
+    Epoch 0
+
+proc createInitialDepositSnapshot*(
+    depositContractAddress: Eth1Address,
+    depositContractDeployedAt: BlockHashOrNumber,
+    web3Url: string): Future[Result[DepositContractSnapshot, string]] {.async.} =
+
+  let dataProviderRes = await Web3DataProvider.new(depositContractAddress, web3Url)
+  if dataProviderRes.isErr:
+    return err(dataProviderRes.error)
+  var dataProvider = dataProviderRes.get
+
+  let knownStartBlockHash =
+    if depositContractDeployedAt.isHash:
+      depositContractDeployedAt.hash
+    else:
+      try:
+        var blk = awaitWithRetries(
+          dataProvider.getBlockByNumber(depositContractDeployedAt.number))
+        blk.hash.asEth2Digest
+      except CatchableError as err:
+        return err(err.msg)
+
+  return ok DepositContractSnapshot(eth1Block: knownStartBlockHash)
+
 proc init*(T: type Eth1Monitor,
            cfg: RuntimeConfig,
            db: BeaconChainDB,
+           getBeaconTime: GetBeaconTimeFn,
            web3Urls: seq[string],
-           depositContractSnapshot: DepositContractSnapshot,
+           depositContractSnapshot: Option[DepositContractSnapshot],
            eth1Network: Option[Eth1Network]): T =
-  doAssert web3Urls.len > 0
+  doAssert(web3Urls.len > 0)
+  doAssert(depositContractSnapshot.isSome or
+           cfg.DEPOSIT_CONTRACT_ADDRESS.isZeroMemory)
 
   var web3Urls = web3Urls
   for url in mitems(web3Urls):
     fixupWeb3Urls url
 
-  putInitialDepositContractSnapshot(db, depositContractSnapshot)
+  if depositContractSnapshot.isSome:
+    putInitialDepositContractSnapshot(db, depositContractSnapshot.get)
 
   T(state: Initialized,
     depositsChain: Eth1Chain.init(cfg, db),
     depositContractAddress: cfg.DEPOSIT_CONTRACT_ADDRESS,
+    getBeaconTime: getBeaconTime,
     web3Urls: web3Urls,
     eth1Network: eth1Network,
-    eth1Progress: newAsyncEvent())
+    eth1Progress: newAsyncEvent(),
+    mustUsePolling: true)
 
 proc safeCancel(fut: var Future[void]) =
   if not fut.isNil and not fut.finished:
@@ -826,7 +903,7 @@ proc resetState(m: Eth1Monitor) {.async.} =
   safeCancel m.runFut
 
   m.depositsChain.clear()
-  m.latestEth1BlockNumber = 0
+  m.latestEth1Block = none(FullBlockId)
 
   if m.dataProvider != nil:
     await m.dataProvider.close()
@@ -846,8 +923,6 @@ const
 
 func earliestBlockOfInterest(m: Eth1Monitor): Eth1BlockNumber =
   m.latestEth1BlockNumber - (2 * m.cfg.ETH1_FOLLOW_DISTANCE) - votedBlocksSafetyMargin
-
-
 
 proc syncBlockRange(m: Eth1Monitor,
                     merkleizer: ref DepositsMerkleizer,
@@ -903,6 +978,7 @@ proc syncBlockRange(m: Eth1Monitor,
 
     let blocksWithDeposits = depositEventsToBlocks(depositLogs)
 
+    m.eth1Progress.fire()
     for i in 0 ..< blocksWithDeposits.len:
       let blk = blocksWithDeposits[i]
 
@@ -1017,6 +1093,9 @@ proc syncBlockRange(m: Eth1Monitor,
 
           m.signalGenesis m.createGenesisState(genesisBlock)
 
+func init(T: type FullBlockId, blk: Eth1BlockHeader|BlockObject): T =
+  FullBlockId(number: Eth1BlockNumber blk.number, hash: blk.hash)
+
 proc startEth1Syncing(m: Eth1Monitor, delayBeforeStart: Duration) {.async.} =
   if m.state == Failed:
     await m.resetState()
@@ -1049,43 +1128,55 @@ proc startEth1Syncing(m: Eth1Monitor, delayBeforeStart: Duration) {.async.} =
     if expectedNetwork != providerNetwork:
       fatal "The specified web3 provider serves data for a different network",
              expectedNetwork, providerNetwork
-      quit 1
 
   m.state = Started
+  var subscriptionFailed = false
 
-  await m.dataProvider.onBlockHeaders do (blk: Eth1BlockHeader)
-                                         {.raises: [Defect], gcsafe.}:
-    try:
-      if blk.number.uint64 > m.latestEth1BlockNumber:
-        eth1_latest_head.set blk.number.toGaugeValue
-        m.latestEth1BlockNumber = Eth1BlockNumber blk.number
-        m.eth1Progress.fire()
-    except Exception:
-      # TODO Investigate why this exception is being raised
-      raiseAssert "AsyncEvent.fire should not raise exceptions"
-  do (err: CatchableError):
-    debug "Error while processing Eth1 block headers subscription", err = err.msg
+  if not m.mustUsePolling:
+    proc newBlockHeadersHandler(blk: Eth1BlockHeader)
+                               {.raises: [Defect], gcsafe.} =
+      try:
+        if blk.number.uint64 > m.latestEth1BlockNumber:
+          eth1_latest_head.set blk.number.toGaugeValue
+          m.latestEth1Block = some FullBlockId.init(blk)
+          m.eth1Progress.fire()
+      except Exception:
+        # TODO Investigate why this exception is being raised
+        raiseAssert "AsyncEvent.fire should not raise exceptions"
 
-  let startBlock = awaitWithRetries(
-    m.dataProvider.getBlockByHash(m.depositsChain.finalizedBlockHash.asBlockHash))
+    proc subscriptionErrorHandler(err: CatchableError)
+                                 {.raises: [Defect], gcsafe.} =
+      subscriptionFailed = true
+      debug "Error while processing Eth1 block headers subscription", err = err.msg
 
-  doAssert m.depositsChain.blocks.len == 0
-  m.depositsChain.addBlock Eth1Block(
-    number: Eth1BlockNumber startBlock.number,
-    timestamp: Eth1BlockTimestamp startBlock.timestamp,
-    voteData: eth1DataFromMerkleizer(
-      m.depositsChain.finalizedBlockHash,
-      m.depositsChain.finalizedDepositsMerkleizer))
+    await m.dataProvider.onBlockHeaders(newBlockHeadersHandler,
+                                        subscriptionErrorHandler)
 
-  var eth1SyncedTo = Eth1BlockNumber startBlock.number
-  eth1_synced_head.set eth1SyncedTo.toGaugeValue
-  eth1_finalized_head.set eth1SyncedTo.toGaugeValue
-  eth1_finalized_deposits.set(
-    m.depositsChain.finalizedDepositsMerkleizer.getChunkCount.toGaugeValue)
+  let shouldProcessDeposits = not m.depositContractAddress.isZeroMemory
+  var scratchMerkleizer: ref DepositsMerkleizer
+  var eth1SyncedTo: Eth1BlockNumber
 
-  var scratchMerkleizer = newClone(copy m.finalizedDepositsMerkleizer)
+  if shouldProcessDeposits:
+    let startBlock = awaitWithRetries(
+      m.dataProvider.getBlockByHash(m.depositsChain.finalizedBlockHash.asBlockHash))
 
-  debug "Starting Eth1 syncing", `from` = shortLog(m.depositsChain.blocks[0])
+    doAssert m.depositsChain.blocks.len == 0
+    m.depositsChain.addBlock Eth1Block(
+      number: Eth1BlockNumber startBlock.number,
+      timestamp: Eth1BlockTimestamp startBlock.timestamp,
+      voteData: eth1DataFromMerkleizer(
+        m.depositsChain.finalizedBlockHash,
+        m.depositsChain.finalizedDepositsMerkleizer))
+
+    eth1SyncedTo = Eth1BlockNumber startBlock.number
+    eth1_synced_head.set eth1SyncedTo.toGaugeValue
+    eth1_finalized_head.set eth1SyncedTo.toGaugeValue
+    eth1_finalized_deposits.set(
+      m.depositsChain.finalizedDepositsMerkleizer.getChunkCount.toGaugeValue)
+
+    scratchMerkleizer = newClone(copy m.finalizedDepositsMerkleizer)
+
+    debug "Starting Eth1 deposits syncing", `from` = shortLog(m.depositsChain.blocks[0])
 
   while true:
     if bnStatus == BeaconNodeStatus.Stopping:
@@ -1176,65 +1267,9 @@ proc testWeb3Provider*(web3Url: Uri,
     echo "Web3 provider is not archive mode: ", err.msg
 
 when hasGenesisDetection:
-  proc init*(T: type Eth1Monitor,
-             db: BeaconChainDB,
-             cfg: RuntimeConfig,
-             web3Urls: seq[string],
-             depositContractAddress: Eth1Address,
-             depositContractDeployedAt: BlockHashOrNumber,
-             eth1Network: Option[Eth1Network]): Future[Result[T, string]] {.async.} =
-    doAssert web3Urls.len > 0
-    try:
-      var urlIdx = 0
-      let dataProviderRes = await Web3DataProvider.new(depositContractAddress, web3Urls[urlIdx])
-      if dataProviderRes.isErr:
-        return err(dataProviderRes.error)
-      var dataProvider = dataProviderRes.get
-
-      let knownStartBlockHash =
-        if depositContractDeployedAt.isHash:
-          depositContractDeployedAt.hash
-        else:
-          var blk: BlockObject
-          while true:
-            try:
-              blk = awaitWithRetries(
-                dataProvider.getBlockByNumber(depositContractDeployedAt.number))
-              break
-            except CatchableError as err:
-              error "Failed to obtain details for the starting block " &
-                    "of the deposit contract sync. The Web3 provider " &
-                    "may still be not fully synced", error = err.msg
-            await sleepAsync(chronos.seconds(10))
-            # TODO: After a single failure, the web3 object may enter a state
-            #       where it's no longer possible to make additional requests.
-            #       Until this is fixed upstream, we'll just try to recreate
-            #       the web3 provider before retrying. In case this fails,
-            #       the Eth1Monitor will be restarted.
-            inc urlIdx
-            dataProvider = tryGet(
-              await Web3DataProvider.new(depositContractAddress,
-                                         web3Urls[urlIdx mod web3Urls.len]))
-          blk.hash.asEth2Digest
-
-      let depositContractSnapshot = DepositContractSnapshot(
-        eth1Block: knownStartBlockHash)
-
-      var monitor = Eth1Monitor.init(
-        db,
-        cfg,
-        web3Urls,
-        depositContractAddress,
-        depositContractSnapshot,
-        eth1Network)
-
-      for i in 0 ..< db.genesisDeposits.len:
-        monitor.produceDerivedData db.genesisDeposits.get(i)
-
-      return ok monitor
-
-    except CatchableError as err:
-      return err("Failed to initialize the Eth1 monitor")
+  proc loadDepositsFromDatabase*(m: Eth1Monitor) =
+    for i in 0 ..< m.db.genesisDeposits.len:
+      m.produceDerivedData m.db.genesisDeposits.get(i)
 
   proc findGenesisBlockInRange(m: Eth1Monitor, startBlock, endBlock: Eth1Block):
                                Future[Eth1Block] {.async.} =

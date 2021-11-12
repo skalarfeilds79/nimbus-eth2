@@ -12,7 +12,7 @@ import
   chronicles, chronos, metrics,
   stew/results,
   # Internals
-  ../spec/datatypes/[phase0, altair],
+  ../spec/datatypes/[phase0, altair, merge],
   ../spec/[
     beaconstate, state_transition_block, forks, helpers, network, signatures],
   ../consensus_object_pools/[
@@ -227,8 +227,7 @@ proc validateBeaconBlock*(
     # "[IGNORE] The block is the first block ..."
     return errIgnore("BeaconBlock: already seen")
 
-  let
-    slotBlockRef = getBlockBySlot(dag, signed_beacon_block.message.slot)
+  let slotBlockRef = getBlockBySlot(dag, signed_beacon_block.message.slot)
 
   if not slotBlockRef.isNil:
     let blck = dag.get(slotBlockRef).data

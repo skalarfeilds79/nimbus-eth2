@@ -8,6 +8,7 @@
 {.push raises: [Defect].}
 
 import
+  chronos,
   std/[options, sequtils, tables, sets],
   stew/[assign2, byteutils, results],
   metrics, snappy, chronicles,
@@ -16,6 +17,12 @@ import
   ../spec/datatypes/[phase0, altair, merge],
   ".."/beacon_chain_db,
   "."/[block_pools_types, block_quarantine]
+
+import stint
+import stint/endians2
+
+import web3/[engine_api, ethtypes]
+import ../eth1/eth1_monitor   # for asBlockHash only
 
 export
   eth2_merkleization, eth2_ssz_serialization,
@@ -1461,3 +1468,133 @@ proc getProposer*(
       return none(ValidatorIndex)
 
   proposer
+
+proc newExecutionPayload(
+    web3Provider: auto, executionPayload: merge.ExecutionPayload):
+    Future[bool] {.async.} =
+  debug "newBlock: inserting block into execution engine",
+    parent_hash = executionPayload.parent_hash,
+    block_hash = executionPayload.block_hash
+  template getTypedTransaction(t: Transaction): TypedTransaction =
+    TypedTransaction(t.value.distinctBase)
+  let rpcExecutionPayload = (ref engine_api.ExecutionPayloadV1)(
+    parentHash: executionPayload.parent_hash.asBlockHash,
+    coinbase: Address(executionPayload.coinbase.data),
+    stateRoot: executionPayload.state_root.asBlockHash,
+    receiptRoot: executionPayload.receipt_root.asBlockHash,
+    logsBloom: FixedBytes[256](executionPayload.logs_bloom.data),
+    random: executionPayload.random.asBlockHash,
+    blockNumber: Quantity(executionPayload.block_number),
+    gasLimit: Quantity(executionPayload.gas_limit),
+    gasUsed: Quantity(executionPayload.gas_used),
+    timestamp: Quantity(executionPayload.timestamp),
+    extraData: DynamicBytes[32](executionPayload.extra_data),
+
+    # TODO x86 and the usual ARM ABIs are all little-endian, so this matches
+    # the spec coincidentally, but it's unportable
+    baseFeePerGas:
+      UInt256.fromBytes(executionPayload.base_fee_per_gas.data),
+
+    blockHash: executionPayload.block_hash.asBlockHash,
+    transactions: mapIt(executionPayload.transactions, it.getTypedTransaction))
+  try:
+    let payloadStatus = await(web3Provider.executePayload(rpcExecutionPayload[])).status
+    # Be liberal in what you accept
+    if payloadStatus == "SYNCING":
+      debug "newExecutionPayload: attempting to insert block into syncing EL. CL should be syncing too."
+    elif payloadStatus != "VALID":
+      debug "newExecutionPayload failed", payloadStatus
+
+    return payloadStatus in ["SYNCING", "VALID"]
+  except CatchableError as err:
+    debug "newExecutionPayload failed", msg = err.msg
+    return false
+
+proc executionPayloadSync*(
+    chainDag: ChainDAGRef, web3Provider: auto,
+    blck: merge.BeaconBlock) {.async.} =
+  # storeBlock() has already run, so already in database, if resolved. Blocks
+  # not resolved should not get their execution payloads added, either way. A
+  # way of looking at this is as a kind of eth1-block-sync in terms of future
+  # refactoring. Notably, newBlock doesnt matter until assembleBlock. It thus
+  # isn't required to be completely synchronized all the time, only close, so
+  # that assembleBlock can be guaranteed to catch up, in a reasonably bounded
+  # time frame.
+
+  info "FOO3",
+    parent_hash = blck.body.execution_payload.parent_hash,
+    block_hash = blck.body.execution_payload.block_hash
+
+  # Fast-path out. Maybe it just works and the execution engine was already
+  # synced. This should be the usual case.
+  if await web3Provider.newExecutionPayload(blck.body.execution_payload):
+    return
+
+  info "FOO4",
+    parent_hash = blck.body.execution_payload.parent_hash,
+    block_hash = blck.body.execution_payload.block_hash
+
+  # Execution engine rejected block, so backfill execution engine.
+  var
+    executionPayloads = @[blck.body.execution_payload]
+    root = blck.parent_root
+
+  # ChainDAG might get pruned, but need to go back to Eth1 root, so access
+  # database. While this is potentially unbounded, it practically will not
+  # occur outside a single initialization step or the execution engine has
+  # not been maintaining reliable connections with Nimbus.
+  #
+  # This loop enqueues execution payloads which don't yet apply, until it
+  # finds one which does, at which point all those queued payloads apply.
+
+  while true:
+    let blockData = chainDag.get(root)
+
+    if blockData.isNone or blockData.get.data.kind < BeaconBlockFork.Merge:
+      break
+
+    let executionPayload = blockData.get.data.mergeBlock.message.body.execution_payload
+
+    if await web3Provider.newExecutionPayload(executionPayload):
+      break
+
+    debug "executionPayloadSync: backfilling execution with consensus_newBlock",
+      parent_hash = executionPayload.parent_hash,
+      block_hash = executionPayload.block_hash
+
+    # This payload didn't apply either, so queue it up to be applied once the
+    # newest applicable execution payload is found.
+    # TODO per latest sync discussions, we should simply let the EL do its sync
+    #      and retry - also, this approach is obviously not sustainable once
+    #      there are lots of blocks - we should _perhaps_ retry the latest
+    #      block we have however!
+    if executionPayloads.len > 10:
+      info "FOO5",
+        parent_hash = executionPayload.parent_hash,
+        block_hash = executionPayload.block_hash
+      break
+
+    executionPayloads.add executionPayload
+
+    # Might run out of execution-layer chain...
+    if executionPayload.parent_hash == default(Eth2Digest) or
+        executionpayload.blockhash == default(Eth2Digest):
+      info "FOO6",
+        parent_hash = executionPayload.parent_hash,
+        block_hash = executionPayload.block_hash
+      break
+
+    # ... or consensus-layer chain.
+    root = blockData.get.data.mergeBlock.message.parent_root
+    if root == default(Eth2Digest):
+      info "FOO7",
+        parent_hash = executionPayload.parent_hash,
+        block_hash = executionPayload.block_hash
+      break
+
+  # executionPayloads is ordered from newest to oldest, but execution payloads
+  # must be applied oldest to newest.
+  doAssert executionPayloads.len > 0
+  for i in countdown(executionPayloads.len - 1, 0):
+    if not await web3Provider.newExecutionPayload(executionPayloads[i]):
+      break  # TODO could detect pathological failure loops here
