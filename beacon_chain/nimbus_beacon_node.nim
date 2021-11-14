@@ -799,9 +799,11 @@ proc updateGossipStatus(node: BeaconNode, slot: Slot) {.async.} =
     of GossipState.InTransitionToAltair:
       warn "Unexpected clock regression during altair transition"
       node.removeAltairMessageHandlers()
+      node.removeMergeMessageHandlers()
     of GossipState.ConnectedToAltair:
       warn "Unexpected clock regression during altair transition"
       node.removeAltairMessageHandlers()
+      node.removeMergeMessageHandlers()
       node.addPhase0MessageHandlers(slot)
 
   of GossipState.InTransitionToAltair:
@@ -810,8 +812,10 @@ proc updateGossipStatus(node: BeaconNode, slot: Slot) {.async.} =
     of GossipState.Disconnected:
       node.addPhase0MessageHandlers(slot)
       node.addAltairMessageHandlers(slot)
+      node.addMergeMessageHandlers(slot)
     of GossipState.ConnectedToPhase0:
       node.addAltairMessageHandlers(slot)
+      node.addMergeMessageHandlers(slot)
     of GossipState.ConnectedToAltair:
       warn "Unexpected clock regression during altair transition"
       node.addPhase0MessageHandlers(slot)
@@ -821,9 +825,11 @@ proc updateGossipStatus(node: BeaconNode, slot: Slot) {.async.} =
     of GossipState.ConnectedToAltair: discard
     of GossipState.Disconnected:
       node.addAltairMessageHandlers(slot)
+      node.addMergeMessageHandlers(slot)
     of GossipState.ConnectedToPhase0:
       node.removePhase0MessageHandlers()
       node.addAltairMessageHandlers(slot)
+      node.addMergeMessageHandlers(slot)
     of GossipState.InTransitionToAltair:
       node.removePhase0MessageHandlers()
 
