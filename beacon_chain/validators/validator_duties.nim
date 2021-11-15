@@ -36,6 +36,7 @@ import
 
 import stint/endians2
 import stint/private/datatypes
+import web3, web3/engine_api
 
 # Metrics for tracking attestation and beacon block loss
 const delayBuckets = [-Inf, -4.0, -2.0, -1.0, -0.5, -0.1, -0.05,
@@ -383,11 +384,24 @@ proc getBlockProposalEth1Data*(node: BeaconNode,
       state, finalizedEpochRef.eth1_data,
       finalizedEpochRef.eth1_deposit_index)
 
+proc forkchoice_updated(state: merge.BeaconState,
+                        head_block_hash: Eth2Digest,
+                        finalized_block_hash: Eth2Digest,
+                        fee_recipient: Address,
+                        execution_engine: Web3DataProviderRef):
+                        Future[Option[uint64]] {.async.} =
+  let
+    timestamp = compute_timestamp_at_slot(state, state.slot)
+    random = get_randao_mix(state, get_current_epoch(state))
+  return some((await execution_engine.forkchoiceUpdated(
+    head_block_hash, finalized_block_hash, timestamp, random.data,
+    fee_recipient)).payloadId.get.uint64)
+
 # https://github.com/ethereum/consensus-specs/blob/v1.1.0/specs/merge/validator.md#executionpayload
 proc get_execution_payload(
-    payload_id: Opt[uint64], execution_engine: Web3DataProviderRef):
+    payload_id: Option[uint64], execution_engine: Web3DataProviderRef):
     Future[merge.ExecutionPayload] {.async.} =
-  return if payload_id.isErr():
+  return if payload_id.isNone():
     # Pre-merge, empty payload
     default(merge.ExecutionPayload)
   else:
@@ -402,7 +416,7 @@ proc get_execution_payload(
     # TODO split these conversions out and enable round-trip testing
     merge.ExecutionPayload(
       parent_hash: rpcExecutionPayload.parentHash.asEth2Digest,
-      coinbase: EthAddress(data: rpcExecutionPayload.coinbase.distinctBase),
+      coinbase: ExecutionAddress(data: rpcExecutionPayload.coinbase.distinctBase),
       state_root: rpcExecutionPayload.stateRoot.asEth2Digest,
       receipt_root: rpcExecutionPayload.receiptRoot.asEth2Digest,
       logs_bloom: BloomLogs(data: rpcExecutionPayload.logsBloom.distinctBase),
@@ -461,18 +475,36 @@ proc makeBeaconBlockForHeadAndSlot*(node: BeaconNode,
           SyncAggregate.init()
         else:
           node.sync_committee_msg_pool[].produceSyncAggregate(head.root),
-        default(merge.ExecutionPayload),
-        #when false:
-        #  if slot.epoch < node.dag.cfg.MERGE_FORK_EPOCH:
-        #    default(merge.ExecutionPayload)
-        #  else:
-        #    # Loudly fail for now. Needs a more reasonable fallback.
-        #    doAssert not node.eth1Monitor.isNil
-        #
-        #    let payload_id = 0'u64    # TODO WRONG, probably do forkchoiceUpdate here so not as to carry around payload_id
-        #    let payload = await get_execution_payload(
-        #      ok(payload_id), node.consensusManager.web3Provider)
-        #    payload,
+        if slot.epoch < node.dag.cfg.MERGE_FORK_EPOCH:
+          default(merge.ExecutionPayload)
+        else:
+          # TODO a more reasonable fallback
+          doAssert not node.eth1Monitor.isNil
+
+          let
+            feeRecipient =
+              Eth1Address.fromHex("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b")
+            terminalBlockHash =
+              if node.eth1Monitor.terminalBlockHash.isSome:
+                node.eth1Monitor.terminalBlockHash.get.asEth2Digest
+              else:
+                default(Eth2Digest)
+            latestHead =
+              if node.dag.head.executionBlockRoot != default(Eth2Digest):
+                node.dag.head.executionBlockRoot
+              else:
+                terminalBlockHash
+            latestFinalized =
+              if node.dag.finalizedHead.blck.executionBlockRoot != default(Eth2Digest):
+                node.dag.finalizedHead.blck.executionBlockRoot
+              else:
+                terminalBlockHash
+            payload_id = (await forkchoiceUpdated(
+              proposalState.data.mergeData.data, latestHead, latestFinalized,
+              feeRecipient, node.consensusManager.web3Provider))
+            payload = await get_execution_payload(
+              some(payload_id.get.uint64), node.consensusManager.web3Provider)
+          payload,
         noRollback, # Temporary state - no need for rollback
         cache)
     except CatchableError as err:

@@ -1212,7 +1212,7 @@ proc startEth1Syncing(m: Eth1Monitor, delayBeforeStart: Duration) {.async.} =
 
     notice "FOO2",
       mCurrentEpoch = m.currentEpoch,
-      mMERGEFORKEPOCH = m.cfg.MERGE_FORK_EPOCH,
+      mergeForkEpoch = m.cfg.MERGE_FORK_EPOCH,
       isNoTermBlock = m.terminalBlockHash.isNone
     if m.currentEpoch >= m.cfg.MERGE_FORK_EPOCH and m.terminalBlockHash.isNone:
       # TODO why would latestEth1Block be isNone?

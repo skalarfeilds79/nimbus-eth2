@@ -569,11 +569,14 @@ proc updateAttestationSubnetHandlers(node: BeaconNode, slot: Slot) =
   of GossipState.InTransitionToAltair:
     node.network.unsubscribeAttestationSubnets(unsubscribeSubnets, node.dag.forkDigests.phase0)
     node.network.unsubscribeAttestationSubnets(unsubscribeSubnets, node.dag.forkDigests.altair)
+    node.network.unsubscribeAttestationSubnets(unsubscribeSubnets, node.dag.forkDigests.merge)
     node.network.subscribeAttestationSubnets(subscribeSubnets, node.dag.forkDigests.phase0)
     node.network.subscribeAttestationSubnets(subscribeSubnets, node.dag.forkDigests.altair)
+    node.network.subscribeAttestationSubnets(subscribeSubnets, node.dag.forkDigests.merge)
   of GossipState.ConnectedToAltair:
     node.network.unsubscribeAttestationSubnets(unsubscribeSubnets, node.dag.forkDigests.altair)
     node.network.subscribeAttestationSubnets(subscribeSubnets, node.dag.forkDigests.altair)
+    node.network.subscribeAttestationSubnets(subscribeSubnets, node.dag.forkDigests.merge)
 
   debug "Attestation subnets",
     slot, epoch = slot.epoch, gossipState = node.gossipState,
@@ -990,44 +993,6 @@ proc onSlotStart(
   node.consensusManager[].updateHead(wallSlot)
 
   await node.handleValidatorDuties(lastSlot, wallSlot)
-
-  let
-    postHead = node.dag.head
-    postFinalizing = node.dag.finalizedHead.blck
-
-  # TODO this is has too many database lookups. There are lots of small
-  # optimizations to this particular structure (only update field which
-  # has changed, et cetera), but should use better approach.
-  if true or (prevHead != postHead or prevFinalizing != postFinalizing):
-    let
-      headBlock = node.dag.getForkedBlock(node.dag.head)
-      finalizingBlock = node.dag.getForkedBlock(node.dag.finalizedHead.blck)
-
-    if  headBlock.kind >= BeaconBlockFork.Merge and
-        finalizingBlock.kind >= BeaconBlockFork.Merge:
-      # TODO withBlck doesn't work when some field doesn't exist on older
-      # object types
-      doAssert headBlock.kind == BeaconBlockFork.Merge
-      doAssert finalizingBlock.kind == BeaconBlockFork.Merge
-      let
-        headExecutionPayloadHash =
-          headBlock.mergeData.message.body.execution_payload.block_hash.asBlockHash
-        finalizingExecutionPayloadHash =
-          finalizingBlock.mergeData.message.body.execution_payload.block_hash.asBlockhash
-      try:
-        debug "FOO7",
-          prevHead = shortLog(prevHead),
-          postHead = shortLog(postHead),
-          prevFinalizing = shortLog(prevFinalizing),
-          postFinalizing = shortLog(postFinalizing)
-
-        # TODO, but don't call here; needs to be after every block
-        # also move try/except handling as result
-        when false:
-          discard await node.consensusManager.web3Provider.forkchoiceUpdated(
-            headExecutionPayloadHash, finalizingExecutionPayloadHash)
-      except CatchableError as err:
-        debug "forkchoiceUpdated failed", msg = err.msg
 
   await onSlotEnd(node, wallSlot)
 

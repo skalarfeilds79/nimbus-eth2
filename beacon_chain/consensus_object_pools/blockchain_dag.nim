@@ -304,15 +304,24 @@ func loadStateCache(
   if epoch > 0:
     load(epoch - 1)
 
-func init(T: type BlockRef, root: Eth2Digest, slot: Slot): BlockRef =
+func init(
+    T: type BlockRef, root: Eth2Digest, executionPayloadRoot: Eth2Digest,
+    slot: Slot): BlockRef =
   BlockRef(
     root: root,
+    executionBlockRoot: executionPayloadRoot,
     slot: slot
   )
 
-func init*(T: type BlockRef, root: Eth2Digest, blck: SomeSomeBeaconBlock):
-    BlockRef =
-  BlockRef.init(root, blck.slot)
+func init*(
+    T: type BlockRef, root: Eth2Digest,
+    blck: phase0.SomeBeaconBlock | altair.SomeBeaconBlock | phase0.TrustedBeaconBlock | altair.TrustedBeaconBlock): BlockRef =
+  BlockRef.init(root, Eth2Digest(), blck.slot)
+
+func init*(
+    T: type BlockRef, root: Eth2Digest, blck: merge.SomeBeaconBlock | merge.TrustedBeaconBlock): BlockRef =
+  BlockRef.init(
+    root, Eth2Digest(blck.body.execution_payload.block_hash), blck.slot)
 
 func contains*(dag: ChainDAGRef, root: Eth2Digest): bool =
   KeyedBlockRef.asLookupKey(root) in dag.blocks
@@ -431,7 +440,8 @@ proc init*(T: type ChainDAGRef, cfg: RuntimeConfig, db: BeaconChainDB,
         curRef = curRef.parent
         break
 
-      let newRef = BlockRef.init(blck.root, blck.summary.slot)
+      # TODO compile-time dispatch on this
+      let newRef = BlockRef.init(blck.root, Eth2Digest(), blck.summary.slot)
       if curRef == nil:
         curRef = newRef
       else:

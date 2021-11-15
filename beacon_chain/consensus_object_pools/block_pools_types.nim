@@ -234,6 +234,8 @@ type
     root*: Eth2Digest ##\
     ## Root that can be used to retrieve block data from database
 
+    executionBlockRoot*: Eth2Digest
+
     parent*: BlockRef ##\
     ## Not nil, except for the tail
 
