@@ -389,17 +389,22 @@ proc forkchoice_updated(state: merge.BeaconState,
                         finalized_block_hash: Eth2Digest,
                         fee_recipient: Address,
                         execution_engine: Web3DataProviderRef):
-                        Future[Option[uint64]] {.async.} =
+                        Future[Option[merge.PayloadId]] {.async.} =
   let
     timestamp = compute_timestamp_at_slot(state, state.slot)
     random = get_randao_mix(state, get_current_epoch(state))
-  return some((await execution_engine.forkchoiceUpdated(
-    head_block_hash, finalized_block_hash, timestamp, random.data,
-    fee_recipient)).payloadId.get.uint64)
+    payloadId =
+      (await execution_engine.forkchoiceUpdated(
+        head_block_hash, finalized_block_hash, timestamp, random.data,
+        fee_recipient)).payloadId
+  return if payloadId.isSome:
+    some(merge.PayloadId(payloadId.get))
+  else:
+    none(merge.PayloadId)
 
 # https://github.com/ethereum/consensus-specs/blob/v1.1.0/specs/merge/validator.md#executionpayload
 proc get_execution_payload(
-    payload_id: Option[uint64], execution_engine: Web3DataProviderRef):
+    payload_id: Option[merge.PayloadId], execution_engine: Web3DataProviderRef):
     Future[merge.ExecutionPayload] {.async.} =
   return if payload_id.isNone():
     # Pre-merge, empty payload
@@ -409,7 +414,7 @@ proc get_execution_payload(
       Transaction.init(t.distinctBase)
 
     let rpcExecutionPayload =
-      await execution_engine.get_payload(payload_id.get.Quantity)
+      await execution_engine.get_payload(payload_id.get)
     when false:
       debug "get_execution_payload: execution_engine.get_payload",
         rpcExecutionPayload
@@ -503,7 +508,7 @@ proc makeBeaconBlockForHeadAndSlot*(node: BeaconNode,
               proposalState.data.mergeData.data, latestHead, latestFinalized,
               feeRecipient, node.consensusManager.web3Provider))
             payload = await get_execution_payload(
-              some(payload_id.get.uint64), node.consensusManager.web3Provider)
+              payload_id, node.consensusManager.web3Provider)
           payload,
         noRollback, # Temporary state - no need for rollback
         cache)
