@@ -1578,7 +1578,7 @@ proc executionPayloadSync*(
     #      and retry - also, this approach is obviously not sustainable once
     #      there are lots of blocks - we should _perhaps_ retry the latest
     #      block we have however!
-    if executionPayloads.len > 10:
+    if executionPayloads.len > 20:
       info "FOO5",
         parent_hash = executionPayload.parent_hash,
         block_hash = executionPayload.block_hash
