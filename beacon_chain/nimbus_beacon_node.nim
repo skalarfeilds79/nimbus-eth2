@@ -807,6 +807,10 @@ proc onSlotEnd(node: BeaconNode, slot: Slot) {.async.} =
   # This is the last pruning to do as it clears the "needPruning" condition.
   node.consensusManager[].pruneStateCachesAndForkChoice()
 
+  # Nim GC metrics (for the main thread)
+  {.gcsafe.}:
+    updateSystemMetrics()
+
   when declared(GC_fullCollect):
     # The slots in the beacon node work as frames in a game: we want to make
     # sure that we're ready for the next one and don't get stuck in lengthy
@@ -1498,8 +1502,14 @@ proc doRunBeaconNode(config: var BeaconNodeConf, rng: ref BrHmacDrbgContext) {.r
       url = "http://" & $metricsAddress & ":" & $config.metricsPort & "/metrics"
     try:
       startMetricsHttpServer($metricsAddress, config.metricsPort)
-    except CatchableError as exc: raise exc
-    except Exception as exc: raiseAssert exc.msg # TODO fix metrics
+    except CatchableError as exc:
+      raise exc
+    except Exception as exc:
+      raiseAssert exc.msg # TODO fix metrics
+
+  # Nim GC metrics (for the main thread) will be collected in onSlotEnd(), but
+  # we disable piggy-backing on other metrics here.
+  setSystemMetricsAutomaticUpdate(false)
 
   # There are no managed event loops in here, to do a graceful shutdown, but
   # letting the default Ctrl+C handler exit is safe, since we only read from
