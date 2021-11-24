@@ -1179,7 +1179,7 @@ proc pruneStateCachesDAG*(dag: ChainDAGRef) =
 proc updateHead*(
       dag: ChainDAGRef,
       newHead: BlockRef,
-      quarantine: QuarantineRef) =
+      quarantine: var Quarantine) =
   ## Update what we consider to be the current head, as given by the fork
   ## choice.
   ##
