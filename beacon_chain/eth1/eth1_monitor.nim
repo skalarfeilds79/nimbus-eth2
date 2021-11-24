@@ -190,7 +190,7 @@ func latestEth1BlockNumber(m: Eth1Monitor): Eth1BlockNumber =
   else:
     Eth1BlockNumber 0
 
-proc pruneOldBlocks(store: var Eth1RecentBlocks) =
+func pruneOldBlocks(store: var Eth1RecentBlocks) =
   if store.latestBlockHeader.isSome:
     var toDelete: seq[BlockHash]
     for hash, blk in store.blocksByHash:

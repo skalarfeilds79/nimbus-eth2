@@ -33,6 +33,7 @@ const
   # Maybe there should be a config option for this.
   defaultListenAddress* = (static ValidIpAddress.init("0.0.0.0"))
   defaultAdminListenAddress* = (static ValidIpAddress.init("127.0.0.1"))
+  defaultTerminalTotalDifficultyOverride* = high(uint64)
 
 type
   BNStartUpCmd* = enum
