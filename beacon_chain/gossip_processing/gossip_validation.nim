@@ -8,6 +8,7 @@
 {.push raises: [Defect].}
 
 import
+  std/sequtils,
   # Status
   chronicles, chronos, metrics,
   stew/results,
@@ -792,7 +793,7 @@ proc validateContribution*(
     msg: SignedContributionAndProof,
     wallTime: BeaconTime,
     checkSignature: bool):
-    Result[CookedSig, ValidationError] =
+    Result[(CookedSig, seq[ValidatorIndex]), ValidationError] =
 
   # [IGNORE] The contribution's slot is for the current slot
   # (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance)
@@ -855,10 +856,13 @@ proc validateContribution*(
     initialized = false
     syncCommitteeSlot = msg.message.contribution.slot + 1
 
-  for validatorIndex in dag.syncCommitteeParticipants(
-      syncCommitteeSlot,
-      committeeIdx,
-      msg.message.contribution.aggregation_bits):
+  # TODO we take a copy of the participants to avoid the data going stale
+  #      between validation and use - nonetheless, a design that avoids it and
+  #      stays safe would be nice
+  let participants = toSeq(dag.syncCommitteeParticipants(
+      syncCommitteeSlot, committeeIdx,
+      msg.message.contribution.aggregation_bits))
+  for validatorIndex in participants:
     let validatorPubKey = dag.validatorKey(validatorIndex)
     if not validatorPubKey.isSome():
       # This should never happen (!)
@@ -895,4 +899,4 @@ proc validateContribution*(
     return errReject(
       "SignedContributionAndProof: aggregate signature fails to verify")
 
-  ok(cookedSignature.get)
+  ok((cookedSignature.get, participants))

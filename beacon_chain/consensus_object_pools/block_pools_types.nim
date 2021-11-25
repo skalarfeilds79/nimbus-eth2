@@ -16,9 +16,10 @@ import
   # Internals
   ../spec/[signatures_batch, forks],
   ../spec/datatypes/[phase0, altair, merge],
-  ".."/beacon_chain_db
+  ".."/beacon_chain_db,
+  ../validators/validator_monitor
 
-export sets, tables
+export sets, tables, validator_monitor
 
 # #############################################
 #
@@ -131,6 +132,8 @@ type
 
     db*: BeaconChainDB ##\
       ## ColdDB - Stores the canonical chain
+
+    validatorMonitor*: ref ValidatorMonitor
 
     # -----------------------------------
     # ChainDAGRef - DAG of candidate chains

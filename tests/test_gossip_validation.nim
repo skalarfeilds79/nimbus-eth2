@@ -36,7 +36,10 @@ suite "Gossip validation " & preset():
   setup:
     # Genesis state that results in 3 members per committee
     var
-      dag = init(ChainDAGRef, defaultRuntimeConfig, makeTestDB(SLOTS_PER_EPOCH * 3), {})
+      validatorMonitor = newClone(ValidatorMonitor.init())
+      dag = init(
+        ChainDAGRef, defaultRuntimeConfig, makeTestDB(SLOTS_PER_EPOCH * 3),
+        validatorMonitor, {})
       taskpool = Taskpool.new()
       quarantine = QuarantineRef.init(keys.newRng(), taskpool)
       pool = newClone(AttestationPool.init(dag, quarantine))
@@ -181,7 +184,9 @@ suite "Gossip validation - Extra": # Not based on preset config
         cfg
       dag = block:
         let
-          dag = ChainDAGRef.init(cfg, makeTestDB(num_validators), {})
+          validatorMonitor = newClone(ValidatorMonitor.init())
+          dag = ChainDAGRef.init(
+            cfg, makeTestDB(num_validators), validatorMonitor, {})
           taskpool = Taskpool.new()
           quarantine = QuarantineRef.init(keys.newRng(), taskpool)
         var cache = StateCache()

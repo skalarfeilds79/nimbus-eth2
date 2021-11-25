@@ -362,6 +362,20 @@ type
         name: "terminal-total-difficulty-override"
       }: Option[uint64]
 
+      validatorMonitorAuto* {.
+        desc: "Automatically monitor locally active validators"
+        defaultValue: false
+        name: "validator-monitor-auto" }: bool
+
+      validatorMonitorPubkeys* {.
+        desc: "One or more validators to monitor - works best when --subscribe-all-subnets is enabled"
+        name: "validator-monitor-pubkey" }: seq[ValidatorPubKey]
+
+      validatorMonitorTotals* {.
+        desc: "Publish metrics to single 'totals' label for better collection performance when monitoring many validators"
+        defaultValue: false
+        name: "validator-monitor-totals" }: bool
+
     of createTestnet:
       testnetDepositsFile* {.
         desc: "A LaunchPad deposits file for the genesis state validators"
@@ -662,6 +676,12 @@ func completeCmdArg*(T: type Uri, input: TaintedString): seq[string] =
 func parseCmdArg*(T: type PubKey0x, input: TaintedString): T
                  {.raises: [ValueError, Defect].} =
   PubKey0x(hexToPaddedByteArray[RawPubKeySize](input.string))
+
+func parseCmdArg*(T: type ValidatorPubKey, input: TaintedString): T
+                 {.raises: [ValueError, Defect].} =
+  let res = ValidatorPubKey.fromHex(input.string)
+  if res.isErr(): raise (ref ValueError)(msg: $res.error())
+  res.get()
 
 func completeCmdArg*(T: type PubKey0x, input: TaintedString): seq[string] =
   return @[]

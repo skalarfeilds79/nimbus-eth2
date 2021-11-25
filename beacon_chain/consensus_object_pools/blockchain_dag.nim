@@ -376,8 +376,9 @@ proc getForkedBlock(db: BeaconChainDB, root: Eth2Digest):
     err()
 
 proc init*(T: type ChainDAGRef, cfg: RuntimeConfig, db: BeaconChainDB,
-           updateFlags: UpdateFlags, onBlockCb: OnBlockCallback = nil,
-           onHeadCb: OnHeadCallback = nil, onReorgCb: OnReorgCallback = nil,
+           validatorMonitor: ref ValidatorMonitor, updateFlags: UpdateFlags,
+           onBlockCb: OnBlockCallback = nil, onHeadCb: OnHeadCallback = nil,
+           onReorgCb: OnReorgCallback = nil,
            onFinCb: OnFinalizedCallback = nil): ChainDAGRef =
   # TODO we require that the db contains both a head and a tail block -
   #      asserting here doesn't seem like the right way to go about it however..
@@ -497,10 +498,11 @@ proc init*(T: type ChainDAGRef, cfg: RuntimeConfig, db: BeaconChainDB,
       quit 1
 
   let dag = ChainDAGRef(
+    db: db,
+    validatorMonitor: validatorMonitor,
     blocks: blocks,
     tail: tailRef,
     genesis: genesisRef,
-    db: db,
     forkDigests: newClone ForkDigests.init(
       cfg,
       getStateField(tmpState.data, genesis_validators_root)),
@@ -787,6 +789,7 @@ proc advanceSlots(
   # target
   doAssert getStateField(state.data, slot) <= slot
   while getStateField(state.data, slot) < slot:
+    let preEpoch = getStateField(state.data, slot).epoch
     loadStateCache(dag, cache, state.blck, getStateField(state.data, slot).epoch)
 
     doAssert process_slots(
@@ -795,6 +798,16 @@ proc advanceSlots(
       "process_slots shouldn't fail when state slot is correct"
     if save:
       dag.putState(state)
+
+      # The reward information in the state transition is computed for epoch
+      # transitions - when transitioning into epoch N, the activities in epoch
+      # N-2 are translated into balance updates, and this is what we capture
+      # in the monitor. This may be inaccurate during a deep reorg (>1 epoch)
+      # which is an acceptable tradeoff for monitoring.
+      withState(state.data):
+        let postEpoch = state.data.slot.epoch
+        if preEpoch != postEpoch:
+          dag.validatorMonitor[].registerEpochInfo(postEpoch, info, state.data)
 
 proc applyBlock(
     dag: ChainDAGRef,
@@ -1284,6 +1297,13 @@ proc updateHead*(
 
   beacon_head_root.set newHead.root.toGaugeValue
   beacon_head_slot.set newHead.slot.toGaugeValue
+
+  withState(dag.headState.data):
+    # Every time the head changes, the "canonical" view of balances and other
+    # state-related metrics change - notify the validator monitor.
+    # Doing this update during head update ensures there's a reasonable number
+    # of such updates happening - at most once per valid block.
+    dag.validatorMonitor[].registerState(state.data)
 
   if lastHead.slot.epoch != newHead.slot.epoch:
     # Epoch updated - in theory, these could happen when the wall clock

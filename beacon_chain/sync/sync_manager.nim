@@ -151,7 +151,7 @@ type
 proc validate*[T](sq: SyncQueue[T],
                   blk: ForkedSignedBeaconBlock): Future[Result[void, BlockError]] =
   let resfut = newFuture[Result[void, BlockError]]("sync.manager.validate")
-  sq.blockProcessor[].addBlock(blk, resfut)
+  sq.blockProcessor[].addBlock(MsgSource.gossip, blk, resfut)
   resfut
 
 proc getShortMap*[T](req: SyncRequest[T],

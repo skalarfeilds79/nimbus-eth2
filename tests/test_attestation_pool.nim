@@ -58,7 +58,10 @@ suite "Attestation pool processing" & preset():
   setup:
     # Genesis state that results in 6 members per committee
     var
-      dag = init(ChainDAGRef, defaultRuntimeConfig, makeTestDB(SLOTS_PER_EPOCH * 6), {})
+      validatorMonitor = newClone(ValidatorMonitor.init())
+      dag = init(
+        ChainDAGRef, defaultRuntimeConfig, makeTestDB(SLOTS_PER_EPOCH * 6),
+        validatorMonitor, {})
       taskpool = Taskpool.new()
       quarantine = QuarantineRef.init(keys.newRng(), taskpool)
       pool = newClone(AttestationPool.init(dag, quarantine))

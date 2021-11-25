@@ -65,7 +65,7 @@ proc checkResponse(roots: openArray[Eth2Digest],
 proc validate(rman: RequestManager,
               b: ForkedSignedBeaconBlock): Future[Result[void, BlockError]] =
   let resfut = newFuture[Result[void, BlockError]]("request.manager.validate")
-  rman.blockProcessor[].addBlock(b, resfut)
+  rman.blockProcessor[].addBlock(MsgSource.gossip, b, resfut)
   resfut
 
 proc fetchAncestorBlocksFromNetwork(rman: RequestManager,

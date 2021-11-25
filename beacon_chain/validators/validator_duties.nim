@@ -187,7 +187,7 @@ proc sendAttestation*(
   # libp2p calls the data handler for any subscription on the subnet
   # topic, it does not perform validation.
   let res = await node.processor.attestationValidator(
-    attestation, subnet_id, checkSignature)
+    MsgSource.api, attestation, subnet_id, checkSignature)
 
   return
     if res.isOk():
@@ -210,8 +210,8 @@ proc sendSyncCommitteeMessage*(
   # validation will also register the message with the sync committee
   # message pool. Notably, although libp2p calls the data handler for
   # any subscription on the subnet topic, it does not perform validation.
-  let res = node.processor.syncCommitteeMessageValidator(msg, subcommitteeIdx,
-                                                     checkSignature)
+  let res = node.processor.syncCommitteeMessageValidator(
+    MsgSource.api, msg, subcommitteeIdx, checkSignature)
   return
     if res.isOk():
       node.network.broadcastSyncCommitteeMessage(msg, subcommitteeIdx)
@@ -309,7 +309,7 @@ proc sendSyncCommitteeContribution*(
     msg: SignedContributionAndProof,
     checkSignature: bool): Future[SendResult] {.async.} =
   let res = node.processor.contributionValidator(
-    msg, checkSignature)
+    MsgSource.api, msg, checkSignature)
 
   return
     if res.isOk():
@@ -435,7 +435,7 @@ proc proposeSignedBlock*(node: BeaconNode,
 
   return withBlck(newBlock):
     let newBlockRef = node.blockProcessor[].storeBlock(
-      blck, wallTime.slotOrZero())
+      MsgSource.api, wallTime, blck)
 
     if newBlockRef.isErr:
       warn "Unable to add proposed block to block pool",
@@ -1097,7 +1097,7 @@ proc sendAggregateAndProof*(node: BeaconNode,
                             proof: SignedAggregateAndProof): Future[SendResult] {.
      async.} =
   # REST/JSON-RPC API helper procedure.
-  let res = await node.processor.aggregateValidator(proof)
+  let res = await node.processor.aggregateValidator(MsgSource.api, proof)
   return
     if res.isOk():
       node.network.broadcastAggregateAndProof(proof)
@@ -1117,7 +1117,7 @@ proc sendAggregateAndProof*(node: BeaconNode,
 proc sendVoluntaryExit*(node: BeaconNode,
                         exit: SignedVoluntaryExit): SendResult =
   # REST/JSON-RPC API helper procedure.
-  let res = node.processor[].voluntaryExitValidator(exit)
+  let res = node.processor[].voluntaryExitValidator(MsgSource.api, exit)
   if res.isOk():
     node.network.broadcastVoluntaryExit(exit)
     ok()
@@ -1129,7 +1129,7 @@ proc sendVoluntaryExit*(node: BeaconNode,
 proc sendAttesterSlashing*(node: BeaconNode,
                            slashing: AttesterSlashing): SendResult =
   # REST/JSON-RPC API helper procedure.
-  let res = node.processor[].attesterSlashingValidator(slashing)
+  let res = node.processor[].attesterSlashingValidator(MsgSource.api, slashing)
   if res.isOk():
     node.network.broadcastAttesterSlashing(slashing)
     ok()
@@ -1141,7 +1141,7 @@ proc sendAttesterSlashing*(node: BeaconNode,
 proc sendProposerSlashing*(node: BeaconNode,
                            slashing: ProposerSlashing): SendResult =
   # REST/JSON-RPC API helper procedure.
-  let res = node.processor[].proposerSlashingValidator(slashing)
+  let res = node.processor[].proposerSlashingValidator(MsgSource.api, slashing)
   if res.isOk():
     node.network.broadcastProposerSlashing(slashing)
     ok()
