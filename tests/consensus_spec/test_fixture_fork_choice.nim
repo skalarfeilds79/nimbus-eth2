@@ -19,7 +19,7 @@ import
   ../../beacon_chain/fork_choice/[fork_choice, fork_choice_types],
   ../../beacon_chain/beacon_chain_db,
   ../../beacon_chain/consensus_object_pools/[
-    blockchain_dag, block_quarantine, block_clearance, spec_cache],
+    blockchain_dag, block_clearance, spec_cache],
   # Third-party
   yaml,
   # Test
@@ -120,7 +120,7 @@ proc loadOps(path: string, fork: BeaconBlockFork): seq[Operation] =
         )
         result.add Operation(kind: opOnBlock,
           blk: ForkedSignedBeaconBlock.init(blk))
-      of BeaconBlockFork.Altair:  
+      of BeaconBlockFork.Altair:
         let blk = parseTest(
           path/filename & ".ssz_snappy",
           SSZ, altair.SignedBeaconBlock
@@ -158,11 +158,11 @@ proc loadOps(path: string, fork: BeaconBlockFork): seq[Operation] =
 proc stepOnBlock(
        dag: ChainDagRef,
        fkChoice: ref ForkChoice,
-       quarantine: QuarantineRef,
+       verifier: var BatchVerifier,
        state: var StateData,
        stateCache: var StateCache,
-       signedBlock: phase0.SignedBeaconBlock | altair.SignedBeaconBlock | merge.SignedBeaconBlock,
-       time: Slot): Result[BlockRef, (ValidationResult, BlockError)] =
+       signedBlock: ForkySignedBeaconBlock,
+       time: Slot): Result[BlockRef, BlockError] =
   # 1. Move state to proper slot.
   dag.updateStateData(
     state,
@@ -179,7 +179,7 @@ proc stepOnBlock(
   else:
     type TrustedBlock = merge.TrustedSignedBeaconBlock
 
-  let blockAdded = dag.addRawBlock(quarantine, signedBlock) do (
+  let blockAdded = dag.addRawBlock(verifier, signedBlock) do (
       blckRef: BlockRef, signedBlock: TrustedBlock, epochRef: EpochRef
     ):
 
@@ -192,8 +192,8 @@ proc stepOnBlock(
       time
     )
     doAssert status.isOk()
-  
-  return blockAdded 
+
+  return blockAdded
 
 proc stepOnAttestation(
        dag: ChainDagRef,
@@ -203,7 +203,7 @@ proc stepOnAttestation(
 
   let epochRef = dag.getEpochRef(dag.head, time.compute_epoch_at_slot())
   let attesters = epochRef.get_attesting_indices(att.data, att.aggregation_bits)
-  
+
   let status = fkChoice[].on_attestation(
     dag,
     att.data.slot, att.data.beacon_block_root, attesters,
@@ -216,7 +216,7 @@ proc stepChecks(
        checks: JsonNode,
        dag: ChainDagRef,
        fkChoice: ref ForkChoice,
-       time: Slot  
+       time: Slot
      ) =
   doAssert checks.len >= 1, "No checks found"
   for check, val in checks:
@@ -282,9 +282,9 @@ proc runTest(path: string, fork: BeaconBlockFork) =
     #     # TODO: support merge genesis state
     #     merge.BeaconState, phase0.BeaconBlock
     #   )
-
-  let taskpool = Taskpool.new(numThreads = 1)
-  let quarantine = QuarantineRef.init(keys.newRng(), taskpool)
+  var
+    taskpool = Taskpool.new()
+    verifier = BatchVerifier(rng: keys.newRng(), taskpool: taskpool)
 
   let steps = loadOps(path, fork)
   var time = stores.fkChoice.checkpoints.time
@@ -300,7 +300,7 @@ proc runTest(path: string, fork: BeaconBlockFork) =
       withBlck(step.blk):
         let status = stepOnBlock(
           stores.dag, stores.fkChoice,
-          quarantine,
+          verifier,
           state[], stateCache,
           blck,
           time)
