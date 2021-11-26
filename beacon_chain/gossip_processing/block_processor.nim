@@ -241,20 +241,48 @@ proc runQueueProcessingLoop*(self: ref BlockProcessor) {.async.} =
     discard await idleAsync().withTimeout(idleTimeout)
 
     let blck = await self[].blocksQueue.popFirst()
-    info "FOO11",
-      block_kind = blck.blck.kind,
-      block_matches_merge = blck.blck.kind >= BeaconBlockFork.Merge
     if blck.blck.kind >= BeaconBlockFork.Merge:
       info "FOO9",
         block_hash = blck.blck.mergeData.message.body.execution_payload.block_hash,
         parent_hash = blck.blck.mergeData.message.body.execution_payload.parent_hash
-    if  self[].processBlock(blck) and blck.blck.kind >= BeaconBlockFork.Merge and
-        # wasn't necessary before, but not incorrect either; helps it run san
-        # execution client for local testnets
-        blck.blck.mergeData.message.body.execution_payload !=
+    if  self[].processBlock(blck) and blck.blck.kind >= BeaconBlockFork.Merge:
+      # Allow local testnets to run without requiring an execution layer
+      if  blck.blck.mergeData.message.body.execution_payload !=
           default(merge.ExecutionPayload):
-      info "FOO10",
-        block_hash = blck.blck.mergeData.message.body.execution_payload.block_hash,
-        parent_hash = blck.blck.mergeData.message.body.execution_payload.parent_hash
-      await self.consensusManager.dag.executionPayloadSync(
-        self.consensusManager.web3Provider, blck.blck.mergeData.message)
+        info "FOO10",
+          block_hash = blck.blck.mergeData.message.body.execution_payload.block_hash,
+          parent_hash = blck.blck.mergeData.message.body.execution_payload.parent_hash
+        # TODO don't await this either
+        await self.consensusManager.dag.executionPayloadSync(
+          self.consensusManager.web3Provider, blck.blck.mergeData.message)
+
+        # TODO don't actually await; consider doing this simpler version in
+        # validator_duties, and also elsewhere -- should never be fcUpdating with
+        # 0's
+        # TODO duplicated a bit with forkchoice_updated in validator_duties wrt
+        # timestamp/random
+        let
+          headBlockRoot = self.consensusManager.dag.head.executionBlockRoot
+          finalizedBlockRoot =
+            self.consensusManager.dag.finalizedHead.blck.executionBlockRoot
+          # TODO combine these withStates
+          timestamp =
+            withState(self.consensusManager.dag.headState.data):
+              compute_timestamp_at_slot(state.data, state.data.slot)
+          random =
+            withState(self.consensusManager.dag.headState.data):
+              get_randao_mix(state.data, get_current_epoch(state.data))
+          # TODO source feeRecipient somewhere -- a config option? not really
+          # relevant for kintsugi, but.
+          feeRecipient =
+            Eth1Address.fromHex("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b")
+        if headBlockRoot != default(Eth2Digest) and
+            finalizedBlockRoot != default(Eth2Digest):
+          # TODO factor this out into exception/return-swallowing wrapper which logs
+          try:
+            discard await forkchoiceUpdated(
+              self.consensusManager.web3Provider, headBlockRoot, finalizedBlockRoot,
+              timestamp, random.data, feeRecipient)
+          except CatchableError as err:
+            # TODO log error
+            discard

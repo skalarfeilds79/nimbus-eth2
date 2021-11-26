@@ -486,6 +486,8 @@ proc makeBeaconBlockForHeadAndSlot*(node: BeaconNode,
           # TODO a more reasonable fallback
           doAssert not node.eth1Monitor.isNil
 
+          # TODO the terminalBlockHash fallback exists to bootstrap this, but
+          # ugliness/complexity probably avoidable
           let
             feeRecipient =
               Eth1Address.fromHex("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b")
@@ -504,7 +506,7 @@ proc makeBeaconBlockForHeadAndSlot*(node: BeaconNode,
                 node.dag.finalizedHead.blck.executionBlockRoot
               else:
                 terminalBlockHash
-            payload_id = (await forkchoiceUpdated(
+            payload_id = (await forkchoice_updated(
               proposalState.data.mergeData.data, latestHead, latestFinalized,
               feeRecipient, node.consensusManager.web3Provider))
             payload = await get_execution_payload(
