@@ -364,7 +364,6 @@ proc init*(T: type BeaconNode,
             headStateSlot = getStateField(dag.headState.data, slot)
       quit 1
 
-  # TODO insert ttd override where RuntimeConfig is read
   if eth1Monitor.isNil and config.web3Urls.len > 0:
     eth1Monitor = Eth1Monitor.init(
       cfg,

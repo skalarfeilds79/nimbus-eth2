@@ -440,7 +440,9 @@ proc init*(T: type ChainDAGRef, cfg: RuntimeConfig, db: BeaconChainDB,
         curRef = curRef.parent
         break
 
-      # TODO compile-time dispatch on this
+      # TODO this becomes a database schema issue: getAncestorSummaries doesn't
+      # contain enough information for this. Can sidestep this if (and only if)
+      # one can just wait for another finalized/head block, at least at first.
       let newRef = BlockRef.init(blck.root, Eth2Digest(), blck.summary.slot)
       if curRef == nil:
         curRef = newRef
@@ -1481,8 +1483,8 @@ proc getProposer*(
 
 proc newExecutionPayload(
     web3Provider: auto, executionPayload: merge.ExecutionPayload):
-    Future[bool] {.async.} =
-  debug "newBlock: inserting block into execution engine",
+    Future[string] {.async.} =
+  debug "executePayload: inserting block into execution engine",
     parent_hash = executionPayload.parent_hash,
     block_hash = executionPayload.block_hash
   template getTypedTransaction(t: Transaction): TypedTransaction =
@@ -1508,17 +1510,19 @@ proc newExecutionPayload(
     blockHash: executionPayload.block_hash.asBlockHash,
     transactions: mapIt(executionPayload.transactions, it.getTypedTransaction))
   try:
-    let payloadStatus = await(web3Provider.executePayload(rpcExecutionPayload[])).status
-    # Be liberal in what you accept
-    if payloadStatus == "SYNCING":
-      debug "newExecutionPayload: attempting to insert block into syncing EL. CL should be syncing too."
-    elif payloadStatus != "VALID":
-      debug "newExecutionPayload failed", payloadStatus
+    let payloadStatus =
+      await(web3Provider.executePayload(rpcExecutionPayload[])).status
+    if payloadStatus notin ["VALID", "INVALID", "SYNCING"]:
+      # TODO use a constrained abstraction; the nim-web3 attempt to create such
+      # didn't work
+      debug "newExecutionPayload: invalid status from execution layer",
+        payloadStatus
+      return "INVALID"
 
-    return payloadStatus in ["SYNCING", "VALID"]
+    return payloadStatus
   except CatchableError as err:
     debug "newExecutionPayload failed", msg = err.msg
-    return false
+    return "INVALID"
 
 proc executionPayloadSync*(
     chainDag: ChainDAGRef, web3Provider: auto,
@@ -1535,10 +1539,25 @@ proc executionPayloadSync*(
     parent_hash = blck.body.execution_payload.parent_hash,
     block_hash = blck.body.execution_payload.block_hash
 
-  # Fast-path out. Maybe it just works and the execution engine was already
-  # synced. This should be the usual case.
-  if await web3Provider.newExecutionPayload(blck.body.execution_payload):
+  let payloadStatus = await web3Provider.newExecutionPayload(
+      blck.body.execution_payload)
+
+  if payloadStatus == "VALID":
+    # TODO but indicate success
     return
+  elif payloadStatus == "INVALID":
+    # TODO but indicate failure
+    # https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.4/src/engine/specification.md#specification
+    # "Client software MUST discard the payload if it's deemed invalid."
+    return
+
+  doAssert payloadStatus == "SYNCING"
+  # https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.4/src/engine/specification.md#specification
+  # "Client software MUST return {status: SYNCING, lastestValidHash: null} if
+  # the sync process is already in progress or if requisite data for payload
+  # validation is missing. In the event that requisite data to validate the
+  # payload is missing (e.g. does not have payload identified by parentHash),
+  # the client software SHOULD initiate the sync process."
 
   info "FOO4",
     parent_hash = blck.body.execution_payload.parent_hash,
@@ -1563,9 +1582,11 @@ proc executionPayloadSync*(
     if blockData.isNone or blockData.get.data.kind < BeaconBlockFork.Merge:
       break
 
-    let executionPayload = blockData.get.data.mergeData.message.body.execution_payload
+    let executionPayload =
+      blockData.get.data.mergeData.message.body.execution_payload
 
-    if await web3Provider.newExecutionPayload(executionPayload):
+    if "SYNCING" != await web3Provider.newExecutionPayload(executionPayload):
+      # Stop on either VALID or INVALID, for different reasons
       break
 
     debug "executionPayloadSync: backfilling execution with consensus_newBlock",
@@ -1574,22 +1595,18 @@ proc executionPayloadSync*(
 
     # This payload didn't apply either, so queue it up to be applied once the
     # newest applicable execution payload is found.
-    # TODO per latest sync discussions, we should simply let the EL do its sync
-    #      and retry - also, this approach is obviously not sustainable once
-    #      there are lots of blocks - we should _perhaps_ retry the latest
-    #      block we have however!
-    if executionPayloads.len > 20:
-      info "FOO5",
-        parent_hash = executionPayload.parent_hash,
-        block_hash = executionPayload.block_hash
-      break
 
+    # There's a potential boundedness concern here. Nethermind, at least, has a
+    # tendency not to sync on its own at all once it enters PoS, so this allows
+    # backtracking to the extent the known blocks allow. It is useful not to do
+    # so repeatedly, though, so TODO throttle this to every X minutes or blocks
+    # so that it doesn't become a DoS vector.
     executionPayloads.add executionPayload
 
     # Might run out of execution-layer chain...
     if executionPayload.parent_hash == default(Eth2Digest) or
-        executionpayload.blockhash == default(Eth2Digest):
-      info "FOO6",
+        executionPayload.blockhash == default(Eth2Digest):
+      info "executionPayloadSync: exhausted execution-layer chain",
         parent_hash = executionPayload.parent_hash,
         block_hash = executionPayload.block_hash
       break
@@ -1597,7 +1614,7 @@ proc executionPayloadSync*(
     # ... or consensus-layer chain.
     root = blockData.get.data.mergeData.message.parent_root
     if root == default(Eth2Digest):
-      info "FOO7",
+      info "executionPayloadSync: exhausted consensus-layer chain",
         parent_hash = executionPayload.parent_hash,
         block_hash = executionPayload.block_hash
       break
@@ -1606,5 +1623,7 @@ proc executionPayloadSync*(
   # must be applied oldest to newest.
   doAssert executionPayloads.len > 0
   for i in countdown(executionPayloads.len - 1, 0):
-    if not await web3Provider.newExecutionPayload(executionPayloads[i]):
+    if "VALID" != await web3Provider.newExecutionPayload(executionPayloads[i]):
+      # Here, only "VALID" suffices. "SYNCING" should be done. "INVALID" isn't,
+      # for different reasons, worth continuing from either.
       break  # TODO could detect pathological failure loops here
